@@ -1,0 +1,237 @@
+
+> client@0.0.0 lint
+> eslint .
+
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Admin\Projects.jsx
+  66:6  warning  React Hook useEffect has a missing dependency: 'fetchProjects'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Admin\Reports.jsx
+  3:20  error  'projectAPI' is defined but never used        no-unused-vars
+  9:10  error  'reports' is assigned a value but never used  no-unused-vars
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Authentication\Login.jsx
+  72:9  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Authentication\Registration.jsx
+  121:9  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Employee\MyProfile.jsx
+  33:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  31 |
+  32 |   useEffect(() => {
+> 33 |     loadProfile()
+     |     ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  34 |   }, [])
+  35 |
+  36 |   const handleInputChange = (e) => {  react-hooks/set-state-in-effect
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Employee\MyProjects.jsx
+  67:3  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  65 |
+  66 | 	useEffect(() => {
+> 67 | 		loadProjects()
+     | 		^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  68 | 	}, [])
+  69 |
+  70 | 	if (loading) {  react-hooks/set-state-in-effect
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Employee\Mytasks.jsx
+  72:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  70 |
+  71 |   useEffect(() => {
+> 72 |     loadTasks()
+     |     ^^^^^^^^^ Avoid calling setState() directly within an effect
+  73 |   }, [])
+  74 |
+  75 |   const filteredTasks = useMemo(() => {  react-hooks/set-state-in-effect
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Employee\Timelog.jsx
+  12:11  error  Empty block statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                no-empty
+  24:11  error  Empty block statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                no-empty
+  37:13  error  Empty block statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                no-empty
+  81:5   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  79 |
+  80 |   useEffect(() => {
+> 81 |     loadLogs()
+     |     ^^^^^^^^ Avoid calling setState() directly within an effect
+  82 |   }, [])
+  83 |
+  84 |   useEffect(() => {  react-hooks/set-state-in-effect
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Manager\MyTeam.jsx
+  84:3  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  82 |
+  83 | 	useEffect(() => {
+> 84 | 		loadTeam()
+     | 		^^^^^^^^ Avoid calling setState() directly within an effect
+  85 | 	}, [])
+  86 |
+  87 | 	if (loading) {  react-hooks/set-state-in-effect
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Manager\Projects.jsx
+  77:3  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  75 |
+  76 | 	useEffect(() => {
+> 77 | 		loadProjects()
+     | 		^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  78 | 	}, [])
+  79 |
+  80 | 	const getBadgeClass = (status) => {  react-hooks/set-state-in-effect
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Manager\Reports.jsx
+  32:3   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  30 |
+  31 | 	useEffect(() => {
+> 32 | 		loadData()
+     | 		^^^^^^^^ Avoid calling setState() directly within an effect
+  33 | 	}, [])
+  34 |
+  35 | 	const stats = useMemo(() => [  react-hooks/set-state-in-effect
+  78:41  error  Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+  76 | 		const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+  77 | 		return days.map((day) => {
+> 78 | 			const count = Math.max(1, Math.floor(Math.random() * 2) + 7)
+     | 			                                     ^^^^^^^^^^^^^ Cannot call impure function
+  79 | 			return { day, hours: count, target: 8 }
+  80 | 		})
+  81 | 	}, [])                                                                                                                                                                                                         react-hooks/purity
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Manager\Tasks.jsx
+  29:7  error  'formatFileSize' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           no-unused-vars
+  77:3  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  75 |
+  76 | 	useEffect(() => {
+> 77 | 		loadData()
+     | 		^^^^^^^^ Avoid calling setState() directly within an effect
+  78 | 	}, [])
+  79 |
+  80 | 	const updateForm = (updates) => {  react-hooks/set-state-in-effect
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Manager\TimeAttendance.jsx
+   38:10  error  Empty block statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              no-empty
+   51:11  error  Empty block statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              no-empty
+   66:10  error  Empty block statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              no-empty
+   93:3   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  91 |
+  92 | 	useEffect(() => {
+> 93 | 		loadRecords()
+     | 		^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  94 | 	}, [])
+  95 |
+  96 | 	const todayLogs = useMemo(() => records.slice(0, 50), [records])  react-hooks/set-state-in-effect
+  122:38  error  Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+  120 | 			const prev = map.get(name) || { name, week1: 0, week2: 0, week3: 0, week4: 0 }
+  121 | 			const buckets = ["week1", "week2", "week3", "week4"]
+> 122 | 			const bucket = buckets[Math.floor(Math.random() * buckets.length)]
+      | 			                                  ^^^^^^^^^^^^^ Cannot call impure function
+  123 | 			prev[bucket] = Math.min(5, prev[bucket] + 1)
+  124 | 			map.set(name, prev)
+  125 | 		})                                                                                                                                                                               react-hooks/purity
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Meetings\Meetings.jsx
+  70:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  68 |
+  69 |   useEffect(() => {
+> 70 |     fetchMeetings()
+     |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  71 |   }, [])
+  72 |
+  73 |   function updateForm(field, value) {  react-hooks/set-state-in-effect
+
+D:\All Imp Project Backup\work-nest\client\src\pages\Messages\Messages.jsx
+  85:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  83 |
+  84 |   useEffect(() => {
+> 85 |     fetchConversations()
+     |     ^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  86 |   }, [])
+  87 |
+  88 |   const filteredContacts = contacts.filter(function (contact) {  react-hooks/set-state-in-effect
+
+✖ 25 problems (22 errors, 3 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+
