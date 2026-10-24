@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Users, CheckSquare, TrendingUp, Clock3, BarChart3 } from "lucide-react";
 import { managerAPI, reportAPI, timeAttendanceAPI } from "../../services/api";
+import { useRealtime } from "../../hooks/useRealtime";
 
 const normalizeStatus = (value) => String(value ?? "").trim().toLowerCase();
 
@@ -12,32 +13,37 @@ const ManagerReports = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const loadData = async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setLoading(true);
+
+      const [tasksData, membersData, timeData, summaryData] = await Promise.all([
+        managerAPI.getReports(),
+        managerAPI.getTeamMembers(),
+        timeAttendanceAPI.getRecords(),
+        reportAPI.getTaskSummary(),
+      ]);
+
+      setTasks(Array.isArray(tasksData) ? tasksData : []);
+      setTeamMembers(Array.isArray(membersData) ? membersData : []);
+      setTimeLogs(Array.isArray(timeData) ? timeData : []);
+      setSummary(summaryData && typeof summaryData === "object" ? summaryData : {});
+    } catch (err) {
+      console.error("Manager reports error:", err);
+      setError(err.message || "Failed to load team reports");
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-
-        const [tasksData, membersData, timeData, summaryData] = await Promise.all([
-          managerAPI.getReports(),
-          managerAPI.getTeamMembers(),
-          timeAttendanceAPI.getRecords(),
-          reportAPI.getTaskSummary(),
-        ]);
-
-        setTasks(Array.isArray(tasksData) ? tasksData : []);
-        setTeamMembers(Array.isArray(membersData) ? membersData : []);
-        setTimeLogs(Array.isArray(timeData) ? timeData : []);
-        setSummary(summaryData && typeof summaryData === "object" ? summaryData : {});
-      } catch (err) {
-        console.error("Manager reports error:", err);
-        setError(err.message || "Failed to load team reports");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
+    const timerId = window.setTimeout(() => {
+      loadData();
+    }, 0);
+    return () => window.clearTimeout(timerId);
   }, []);
+
+  useRealtime(["tasks", "attendance", "reports", "projects"], () => { void loadData({ silent: true }); });
 
   const totalMembers = teamMembers.length || summary.total_employees || tasks.length || 0;
   const completedTasks = tasks.filter((task) => ["approved", "completed", "done"].includes(normalizeStatus(task.status))).length;

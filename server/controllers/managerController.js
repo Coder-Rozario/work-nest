@@ -57,7 +57,7 @@ const getManagerDashboard = async (req, res) => {
       data: {
         team_members: Number(teamRows[0]?.total || 0),
         active_tasks: Number(taskRows[0]?.total || 0),
-      }
+      },
     });
   } catch (error) {
     console.error('Manager dashboard error:', error);
@@ -98,7 +98,8 @@ const getManagerTeamMembers = async (req, res) => {
     }
 
     const [rows] = await db.query(
-      `SELECT u.id, u.full_name, u.email, u.role, u.position, u.team_id, t.name AS team_name
+      `SELECT u.id, u.full_name, u.email, u.role, u.position, u.team_id, t.name AS team_name,
+              COALESCE((SELECT COUNT(*) FROM tasks t2 WHERE t2.company_id = u.company_id AND t2.assignee_id = u.id), 0) AS task_count
        FROM users u
        LEFT JOIN teams t ON t.id = u.team_id
        WHERE u.company_id = ?
@@ -145,7 +146,7 @@ const getManagerTasks = async (req, res) => {
 
 const createTask = async (req, res) => {
   try {
-    const { title, project_name, assignee_id, priority, due_date, status } = req.body;
+    const { title, project_name, assignee_id, priority, due_date, status, description } = req.body;
 
     if (!title || !assignee_id) {
       return res.status(400).json({ success: false, message: 'Title and assignee are required.' });
@@ -166,9 +167,9 @@ const createTask = async (req, res) => {
     }
 
     const [result] = await db.query(
-      `INSERT INTO tasks (company_id, title, project_name, assignee_id, priority, due_date, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ? )`,
-      [req.user.company_id, title, project_name || '', assignee_id, priority || 'Medium', due_date || null, status || 'Assigned', req.user.id]
+      `INSERT INTO tasks (company_id, title, project_name, assignee_id, priority, due_date, status, description, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.user.company_id, title, project_name || '', assignee_id, priority || 'Medium', due_date || null, status || 'Assigned', description || '', req.user.id]
     );
 
     res.status(201).json({ success: true, message: 'Task created.', data: { id: result.insertId } });
@@ -178,25 +179,123 @@ const createTask = async (req, res) => {
   }
 };
 
-const updateTaskStatus = async (req, res) => {
+const updateTask = async (req, res) => {
   try {
-    const { status } = req.body;
+    const taskId = Number(req.params.id);
+    const { title, project_name, assignee_id, priority, due_date, status, description } = req.body;
     const teamIds = await getManagerTeamScope(req.user.company_id, req.user.id);
 
     if (!teamIds.length) {
       return res.status(403).json({ success: false, message: 'You do not manage any team.' });
     }
 
+    const [taskRows] = await db.query(
+      `SELECT id, assignee_id, title, description FROM tasks
+       WHERE id = ? AND company_id = ? AND assignee_id IN (
+         SELECT id FROM users WHERE company_id = ? AND team_id IN (?)
+       )`,
+      [taskId, req.user.company_id, req.user.company_id, teamIds]
+    );
+
+    if (!taskRows.length) {
+      return res.status(404).json({ success: false, message: 'Task not found in your team scope.' });
+    }
+
+    let normalizedAssigneeId = assignee_id === '' || assignee_id === null || assignee_id === undefined ? null : Number(assignee_id);
+
+    if (normalizedAssigneeId !== null && Number.isFinite(normalizedAssigneeId) && normalizedAssigneeId > 0) {
+      const [assigneeRows] = await db.query(
+        `SELECT id FROM users WHERE id = ? AND company_id = ? AND team_id IN (?)`,
+        [normalizedAssigneeId, req.user.company_id, teamIds]
+      );
+
+      if (!assigneeRows.length) {
+        return res.status(403).json({ success: false, message: 'Assignee must be in your team.' });
+      }
+    }
+
     await db.query(
       `UPDATE tasks
-       SET status = ?
+       SET title = ?, project_name = ?, assignee_id = ?, priority = ?, due_date = ?, status = ?, description = ?, updated_at = NOW()
+       WHERE id = ? AND company_id = ?`,
+      [
+        title || taskRows[0].title || '',
+        project_name || '',
+        normalizedAssigneeId,
+        priority || 'Medium',
+        due_date || null,
+        status || 'Assigned',
+        description || taskRows[0].description || '',
+        taskId,
+        req.user.company_id,
+      ]
+    );
+
+    res.status(200).json({ success: true, message: 'Task updated.' });
+  } catch (error) {
+    console.error('Update task error:', error);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+};
+
+const deleteTask = async (req, res) => {
+  try {
+    const taskId = Number(req.params.id);
+    const teamIds = await getManagerTeamScope(req.user.company_id, req.user.id);
+
+    if (!teamIds.length) {
+      return res.status(403).json({ success: false, message: 'You do not manage any team.' });
+    }
+
+    const [result] = await db.query(
+      `DELETE FROM tasks
        WHERE id = ?
          AND company_id = ?
          AND assignee_id IN (
            SELECT id FROM users WHERE company_id = ? AND team_id IN (?)
          )`,
-      [status, req.params.id, req.user.company_id, req.user.company_id, teamIds]
+      [taskId, req.user.company_id, req.user.company_id, teamIds]
     );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: 'Task not found or not in your team scope.' });
+    }
+
+    res.status(200).json({ success: true, message: 'Task deleted.' });
+  } catch (error) {
+    console.error('Delete task error:', error);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+};
+
+const updateTaskStatus = async (req, res) => {
+  try {
+    const { status, review_comment, manager_feedback } = req.body;
+    const teamIds = await getManagerTeamScope(req.user.company_id, req.user.id);
+
+    if (!teamIds.length) {
+      return res.status(403).json({ success: false, message: 'You do not manage any team.' });
+    }
+
+    const normalizedStatus = status || 'Assigned';
+    const reviewText = typeof review_comment === 'string'
+      ? review_comment
+      : (typeof manager_feedback === 'string' ? manager_feedback : '');
+
+    const [result] = await db.query(
+      `UPDATE tasks
+       SET status = ?, review_comment = ?, manager_feedback = ?
+       WHERE id = ?
+         AND company_id = ?
+         AND assignee_id IN (
+           SELECT id FROM users WHERE company_id = ? AND team_id IN (?)
+         )`,
+      [normalizedStatus, reviewText, reviewText, Number(req.params.id), req.user.company_id, req.user.company_id, teamIds]
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: 'Task not found or not in your team scope.' });
+    }
 
     res.status(200).json({ success: true, message: 'Task status updated.' });
   } catch (error) {
@@ -265,6 +364,8 @@ module.exports = {
   getManagerTeamMembers,
   getManagerTasks,
   createTask,
+  updateTask,
+  deleteTask,
   updateTaskStatus,
   getManagerReports,
   getManagerTimeLog,

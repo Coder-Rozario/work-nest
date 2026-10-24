@@ -1,18 +1,7 @@
 import { useEffect, useState } from "react"
 import { ChevronRight } from "lucide-react"
 import { managerAPI } from "../../services/api"
-
-function getStatusBadgeColor(status) {
-	if (status === "online") return "bg-green-50 text-green-700"
-	if (status === "away") return "bg-amber-50 text-amber-700"
-	return "bg-slate-100 text-slate-600"
-}
-
-function getStatusDotColor(status) {
-	if (status === "online") return "bg-green-500"
-	if (status === "away") return "bg-amber-500"
-	return "bg-slate-400"
-}
+import { useRealtime } from "../../hooks/useRealtime"
 
 const MemberDetailModal = ({ member, onClose }) => {
 	if (!member) return null
@@ -20,18 +9,15 @@ const MemberDetailModal = ({ member, onClose }) => {
 	const name = member.full_name || ((member.first_name || "") + " " + (member.last_name || "")).trim()
 
 	return (
-		<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-			<div className="bg-white rounded-xl border border-slate-200 p-6 max-w-md w-full">
-				<div className="flex items-center justify-between mb-4">
-					<h2 className="text-xl font-semibold text-slate-900">{name.trim()}</h2>
-					<span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusBadgeColor(member._status || "offline")}`}>
-						{member._status || "offline"}
-					</span>
+		<div className="worknest-modal-backdrop">
+			<div className="worknest-modal-card max-h-[90vh] max-w-md overflow-y-auto p-6">
+				<div className="mb-4 flex items-center justify-between">
+					<h2 className="text-xl font-semibold text-slate-900">{name.trim() || member.full_name || "Unknown"}</h2>
 				</div>
 
-				<p className="text-sm text-slate-600 mb-4">{member.position || "Employee"}</p>
+				<p className="mb-4 text-sm text-slate-600">{member.position || "Employee"}</p>
 
-				<div className="space-y-3 mb-4">
+				<div className="mb-4 space-y-3">
 					<div>
 						<p className="text-xs text-slate-500 font-medium">Email</p>
 						<p className="text-sm text-slate-900 break-all">{member.email || "N/A"}</p>
@@ -42,7 +28,7 @@ const MemberDetailModal = ({ member, onClose }) => {
 					</div>
 					<div>
 						<p className="text-xs text-slate-500 font-medium">Role</p>
-						<p className="text-sm text-slate-900">{member.role || "Employee"}</p>
+						<p className="text-sm text-slate-900 capitalize">{member.role || "Employee"}</p>
 					</div>
 					<div>
 						<p className="text-xs text-slate-500 font-medium">Active Tasks</p>
@@ -50,7 +36,7 @@ const MemberDetailModal = ({ member, onClose }) => {
 					</div>
 				</div>
 
-				<button onClick={onClose} className="w-full bg-blue-600 text-white font-medium py-2 rounded-lg hover:bg-blue-700">
+				<button onClick={onClose} className="worknest-primary-btn w-full">
 					Close
 				</button>
 			</div>
@@ -63,21 +49,20 @@ const ManagerMyTeam = () => {
 	const [loading, setLoading] = useState(true)
 	const [selectedMember, setSelectedMember] = useState(null)
 
-	const loadTeam = async () => {
+	const loadTeam = async ({ silent = false } = {}) => {
 		try {
-			setLoading(true)
+			if (!silent) setLoading(true)
 			const data = await managerAPI.getTeamMembers()
-			const enriched = (Array.isArray(data) ? data : []).map((m, i) => ({
+			const enriched = (Array.isArray(data) ? data : []).map((m) => ({
 				...m,
 				full_name: m.full_name || `${m.first_name || ""} ${m.last_name || ""}`.trim() || "Unknown",
-				_status: i % 3 === 0 ? "online" : i % 3 === 1 ? "away" : "offline",
-				task_count: 0,
+				task_count: Number(m.task_count) || 0,
 			}))
 			setMembers(enriched)
 		} catch {
 			setMembers([])
 		} finally {
-			setLoading(false)
+			if (!silent) setLoading(false)
 		}
 	}
 
@@ -88,6 +73,8 @@ const ManagerMyTeam = () => {
 
 		return () => window.clearTimeout(timerId)
 	}, [])
+
+	useRealtime(["employees", "teams", "tasks"], () => { void loadTeam({ silent: true }) })
 
 	if (loading) {
 		return <div className="min-h-screen bg-slate-50 p-6 text-center text-slate-500">Loading team...</div>
@@ -113,7 +100,7 @@ const ManagerMyTeam = () => {
 								>
 									<div className="flex items-start justify-between mb-4">
 										<div className="flex items-center gap-3">
-											<div className="h-10 w-10 rounded-full bg-gradient-to-r from-blue-700 to-green-500 flex items-center justify-center text-white text-sm font-medium">
+											<div className="h-10 w-10 rounded-full bg-linear-to-r from-blue-700 to-green-500 flex items-center justify-center text-white text-sm font-medium">
 												{initial}
 											</div>
 											<div>
@@ -127,10 +114,6 @@ const ManagerMyTeam = () => {
 									<div className="space-y-2 text-xs text-slate-600">
 										<div>
 											<span className="font-medium text-slate-900">{member.team_name || "Team"}</span>
-										</div>
-										<div className="flex items-center gap-1">
-											<span className={`block w-2.5 h-2.5 rounded-full ${getStatusDotColor(member._status || "offline")}`} />
-											<span className="capitalize">{member._status || "offline"}</span>
 										</div>
 									</div>
 								</div>

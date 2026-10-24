@@ -62,9 +62,9 @@ const ChangePasswordModal = ({ open, onClose }) => {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+    <div className="worknest-modal-backdrop">
+      <div className="worknest-modal-card max-h-[90vh] max-w-md overflow-y-auto">
+        <div className="worknest-modal-header">
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-blue-100 p-2 text-blue-700">
               <Lock className="h-5 w-5" />
@@ -76,7 +76,7 @@ const ChangePasswordModal = ({ open, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+            className="worknest-ghost-btn rounded-lg p-2"
           >
             <X className="h-4 w-4" />
           </button>
@@ -156,14 +156,14 @@ const ChangePasswordModal = ({ open, onClose }) => {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+              className="worknest-secondary-btn"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+              className="worknest-primary-btn"
             >
               {loading ? "Updating..." : "Update Password"}
             </button>

@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { CheckSquare, Search, Calendar, FileText, X, Paperclip } from "lucide-react"
 import { employeeAPI } from "../../services/api"
+import { useRealtime } from "../../hooks/useRealtime"
 
 const statusColors = {
   Assigned: "bg-slate-100 text-slate-700",
@@ -64,9 +65,9 @@ const EmployeeMyTasks = () => {
   const [progressForm, setProgressForm] = useState({ percentage: 0, note: "" })
   const [submitForm, setSubmitForm] = useState({ workDescription: "", files: [], workUrl: "" })
 
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       const data = await employeeAPI.getTasks()
       setTaskList(Array.isArray(data) ? data : [])
     } catch {
@@ -74,11 +75,18 @@ const EmployeeMyTasks = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    loadTasks()
-  }, [])
+    const timer = setTimeout(() => {
+      loadTasks()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [loadTasks])
+
+  useRealtime("tasks", () => {
+    void loadTasks({ silent: true })
+  })
 
   const filteredTasks = useMemo(() => {
     const q = searchTerm.trim().toLowerCase()
@@ -162,15 +170,20 @@ const EmployeeMyTasks = () => {
       const formData = new FormData()
       formData.append('work_description', submitForm.workDescription)
       formData.append('work_url', submitForm.workUrl || '')
-      ;(submitForm.files || []).forEach((f, idx) => {
-        // If file objects are full File (from input) append; otherwise strings only (preview) are ignored
+      ;(submitForm.files || []).forEach((f) => {
         if (f instanceof File) {
           formData.append('files', f)
         }
       })
 
-      // If files in submitForm are only metadata (name/type/size) we cannot upload them; rely on input files
       await employeeAPI.submitTask(selectedTask.id, formData, true)
+
+      setTaskList((prev) => prev.map((task) =>
+        task.id === selectedTask.id
+          ? { ...task, progress: 100, status: 'Submitted', submission_description: submitForm.workDescription, submission_url: submitForm.workUrl || '' }
+          : task
+      ))
+      setSelectedTask((prev) => prev ? { ...prev, progress: 100, status: 'Submitted', submission_description: submitForm.workDescription, submission_url: submitForm.workUrl || '' } : prev)
       setShowSubmitModal(false)
       setSelectedTask(null)
       setSubmitForm({ workDescription: "", files: [], workUrl: "" })
@@ -395,10 +408,12 @@ const EmployeeMyTasks = () => {
                     <>
                       <p className="mt-4 text-xs font-medium text-slate-500">Attachments</p>
                       {(() => {
-                        let files = []
+                        let files
                         try {
                           files = typeof selectedTask.submission_files === 'string' && selectedTask.submission_files ? JSON.parse(selectedTask.submission_files) : selectedTask.submission_files || []
-                        } catch (e) { files = [] }
+                        } catch {
+                          files = []
+                        }
                         if (!files || files.length === 0) return <p className="mt-1 text-sm text-slate-500">No attachments submitted.</p>
                         return files.map((f, i) => (
                           <div key={i} className="mt-1">
@@ -417,7 +432,7 @@ const EmployeeMyTasks = () => {
 
       {showProgressModal && selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-[92vw] max-w-lg rounded-xl bg-white p-4 shadow-2xl sm:p-6">
+          <div className="w-[92vw] max-h-[90vh] max-w-lg overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:p-6">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Update task</p>

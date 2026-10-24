@@ -1,18 +1,7 @@
 import { useEffect, useState } from "react"
 import { ChevronRight } from "lucide-react"
 import { employeeAPI } from "../../services/api"
-
-function getStatusBadgeColor(status) {
-  if (status === "online") return "bg-green-50 text-green-700"
-  if (status === "away") return "bg-amber-50 text-amber-700"
-  return "bg-slate-100 text-slate-600"
-}
-
-function getStatusDotColor(status) {
-  if (status === "online") return "bg-green-500"
-  if (status === "away") return "bg-amber-500"
-  return "bg-slate-400"
-}
+import { useRealtime } from "../../hooks/useRealtime"
 
 const MemberDetailModal = ({ member, onClose }) => {
   if (!member) return null
@@ -20,13 +9,10 @@ const MemberDetailModal = ({ member, onClose }) => {
   const name = member.full_name || ((member.first_name || "") + " " + (member.last_name || "")).trim()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6">
+    <div className="worknest-modal-backdrop">
+      <div className="worknest-modal-card max-h-[90vh] max-w-md overflow-y-auto p-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-semibold text-slate-900">{name.trim() || member.full_name || "Unknown"}</h2>
-          <span className={`rounded-full px-2 py-1 text-xs font-medium ${getStatusBadgeColor(member._status || "offline")}`}>
-            {member._status || "offline"}
-          </span>
         </div>
 
         <p className="mb-4 text-sm text-slate-600">{member.position || "Employee"}</p>
@@ -50,7 +36,7 @@ const MemberDetailModal = ({ member, onClose }) => {
           </div>
         </div>
 
-        <button onClick={onClose} className="w-full rounded-lg bg-blue-600 py-2 font-medium text-white hover:bg-blue-700">
+        <button onClick={onClose} className="worknest-primary-btn w-full">
           Close
         </button>
       </div>
@@ -63,15 +49,14 @@ const EmployeeMyTeam = () => {
   const [loading, setLoading] = useState(true)
   const [selectedMember, setSelectedMember] = useState(null)
 
-  const loadTeam = async () => {
+  const loadTeam = async ({ silent = false } = {}) => {
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       const data = await employeeAPI.getTeamMembers()
-      const enriched = (Array.isArray(data) ? data : []).map((member, index) => ({
+      const enriched = (Array.isArray(data) ? data : []).map((member) => ({
         ...member,
         full_name: member.full_name || `${member.first_name || ""} ${member.last_name || ""}`.trim() || "Unknown",
-        _status: index % 3 === 0 ? "online" : index % 3 === 1 ? "away" : "offline",
-        task_count: 0,
+        task_count: Number(member.task_count) || 0,
       }))
       setMembers(enriched)
     } catch {
@@ -88,6 +73,10 @@ const EmployeeMyTeam = () => {
 
     return () => window.clearTimeout(timerId)
   }, [])
+
+  useRealtime(["employees", "teams"], () => {
+    void loadTeam({ silent: true })
+  })
 
   if (loading) {
     return <div className="min-h-screen bg-slate-50 p-6 text-center text-slate-500">Loading team...</div>
@@ -114,7 +103,7 @@ const EmployeeMyTeam = () => {
                 >
                   <div className="mb-4 flex items-start justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-r from-blue-700 to-green-500 text-sm font-medium text-white">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-r from-blue-700 to-green-500 text-sm font-medium text-white">
                         {initial}
                       </div>
                       <div>
@@ -128,10 +117,6 @@ const EmployeeMyTeam = () => {
                   <div className="space-y-2 text-xs text-slate-600">
                     <div>
                       <span className="font-medium text-slate-900">{member.team_name || "Team"}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className={`block h-2.5 w-2.5 rounded-full ${getStatusDotColor(member._status || "offline")}`} />
-                      <span className="capitalize">{member._status || "offline"}</span>
                     </div>
                   </div>
                 </div>

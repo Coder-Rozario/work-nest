@@ -27,25 +27,78 @@ const getCookieValue = (name) => {
 
 const hasLockCookie = () => getCookieValue(LOCK_COOKIE_NAME) === "1"
 
+const invalidCredentialsMessage = "Invalid email or password."
 
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
 
 const Login = () => {
   const navigate = useNavigate()
 
-  // state variables for login form
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [rememberMe, setRememberMe] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-  const [errorMessage, setErrorMessage] = useState(() => hasLockCookie() ? "Too many failed attempts. Please try again in 15 minutes." : "")
+  const [errorMessage, setErrorMessage] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [lockTimeRemaining, setLockTimeRemaining] = useState(0)
 
-  // check if user already logged in
+  // Initialize lock state from localStorage
   useEffect(() => {
-    if (hasLockCookie()) {
+    const lockUntil = localStorage.getItem("worknest_lock_until")
+    if (lockUntil) {
+      const remaining = Math.ceil((parseInt(lockUntil) - Date.now()) / 1000)
+      if (remaining > 0) {
+        setLockTimeRemaining(remaining)
+        setErrorMessage(`Too many failed attempts. Please try again in ${Math.ceil(remaining / 60)} minutes.`)
+      } else {
+        localStorage.removeItem("worknest_lock_until")
+        if (typeof document !== "undefined") {
+          document.cookie = `${LOCK_COOKIE_NAME}=; path=/; max-age=0`
+        }
+      }
+    }
+  }, [])
+
+  // Countdown timer
+  useEffect(() => {
+    if (lockTimeRemaining <= 0) return
+
+    const interval = setInterval(() => {
+      setLockTimeRemaining((prev) => {
+        const next = prev - 1
+        if (next <= 0) {
+          clearInterval(interval)
+          localStorage.removeItem("worknest_lock_until")
+          if (typeof document !== "undefined") {
+            document.cookie = `${LOCK_COOKIE_NAME}=; path=/; max-age=0`
+          }
+          setErrorMessage("")
+          return 0
+        }
+        
+        // Update error message with remaining minutes
+        if (next % 60 === 0 || prev === lockTimeRemaining) {
+          setErrorMessage(`Too many failed attempts. Please try again in ${Math.ceil(next / 60)} minutes.`)
+        }
+        return next
+      })
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [lockTimeRemaining])
+
+  useEffect(() => {
+    if (hasLockCookie() || lockTimeRemaining > 0) {
       localStorage.removeItem("worknest_token")
       localStorage.removeItem("worknest_user")
       localStorage.removeItem("worknest_remember_me")
+
+      if (hasLockCookie() && lockTimeRemaining <= 0) {
+        const fifteenMins = 15 * 60
+        setLockTimeRemaining(fifteenMins)
+        localStorage.setItem("worknest_lock_until", (Date.now() + fifteenMins * 1000).toString())
+        setErrorMessage("Too many failed attempts. Please try again in 15 minutes.")
+      }
       return
     }
 
@@ -62,31 +115,32 @@ const Login = () => {
     }
   }, [navigate])
 
-
-  // submit form function
   const handleSubmit = async (e) => {
     e.preventDefault()
     setErrorMessage("")
 
-    if (hasLockCookie()) {
-      setErrorMessage("Too many failed attempts. Please try again in 15 minutes.")
-      localStorage.removeItem("worknest_token")
-      localStorage.removeItem("worknest_user")
-      localStorage.removeItem("worknest_remember_me")
+    const trimmedEmail = email.trim()
+    const trimmedPassword = password.trim()
+
+    if (!trimmedEmail || !isValidEmail(trimmedEmail) || !trimmedPassword) {
+      setErrorMessage(invalidCredentialsMessage)
+      return
+    }
+
+    if (lockTimeRemaining > 0) {
+      setErrorMessage(`Too many failed attempts. Please try again in ${Math.ceil(lockTimeRemaining / 60)} minutes.`)
       return
     }
 
     try {
       setIsLoading(true)
 
-      const loginData = { email, password }
+      const loginData = { email: trimmedEmail, password }
 
-      // api call to backend
       const response = await axios.post(`${API_BASE}/api/auth/login`, loginData, {
         withCredentials: true,
       })
 
-      // save token and user to local storage
       const token = response.data.token
       const user = response.data.user
       localStorage.setItem("worknest_token", token)
@@ -96,26 +150,27 @@ const Login = () => {
         localStorage.setItem("worknest_remember_me", "true")
       }
 
-      // redirect based on user role
       navigate(roleDashboardRoute(user.role || "admin"))
 
     } catch (error) {
       if (import.meta.env.DEV) {
         console.error(error)
       }
-      let errorText = "Login failed. Please try again."
 
-      if (error.response?.data?.message) {
-        errorText = error.response.data.message
-      }
+      let errorText = invalidCredentialsMessage
 
       if (error.response?.data?.locked) {
+        const fifteenMins = 15 * 60
+        setLockTimeRemaining(fifteenMins)
+        localStorage.setItem("worknest_lock_until", (Date.now() + fifteenMins * 1000).toString())
+        
         localStorage.removeItem("worknest_token")
         localStorage.removeItem("worknest_user")
         localStorage.removeItem("worknest_remember_me")
         if (typeof document !== "undefined") {
           document.cookie = `${LOCK_COOKIE_NAME}=1; path=/; max-age=900; SameSite=Lax`
         }
+        errorText = `Too many failed attempts. Please try again in ${Math.ceil(fifteenMins / 60)} minutes.`
       }
 
       setErrorMessage(errorText)
@@ -124,18 +179,12 @@ const Login = () => {
     setIsLoading(false)
   }
 
-
-  // eye button click handler
   const togglePwdVisibility = () => {
     setShowPassword((curr) => !curr)
   }
 
-
-
   return (
     <div className="min-h-screen w-full grid grid-cols-1 lg:grid-cols-2 bg-white">
-      
-      {/* left side - banner */}
       <div className="hidden lg:flex flex-col bg-blue-950 text-white p-12 relative overflow-hidden">
         <div>
           <img src={logo} alt="logo" className="h-28 w-auto" />
@@ -174,11 +223,8 @@ const Login = () => {
         </div>
       </div>
 
-      {/* right side - form */}
       <div className="flex items-center justify-center p-6 lg:p-12">
         <div className="w-full max-w-md">
-
-          {/* mobile logo */}
           <div className="lg:hidden flex items-center gap-2 mb-8">
             <div className="h-9 w-9 rounded-lg bg-linear-to-r from-blue-700 to-green-500 flex items-center justify-center">
               <LayoutGrid className="h-5 w-5 text-white" />
@@ -197,15 +243,12 @@ const Login = () => {
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            
-            {/* show error */}
             {errorMessage != "" && (
               <div className="p-3 bg-red-100 text-red-700 rounded text-sm">
                 {errorMessage}
               </div>
             )}
 
-            {/* email input */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Work email
@@ -226,7 +269,6 @@ const Login = () => {
               </div>
             </div>
 
-            {/* password input */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-sm font-medium text-slate-700">
@@ -266,7 +308,6 @@ const Login = () => {
               </div>
             </div>
 
-            {/* remember me checkbox */}
             <label className="flex items-center gap-2 pt-1">
               <input
                 type="checkbox"
@@ -279,18 +320,16 @@ const Login = () => {
               </span>
             </label>
 
-            {/* submit button */}
             <button
               type="submit"
-              disabled={isLoading}
-              className="w-full flex items-center justify-center gap-2 bg-blue-950 hover:bg-green-600 disabled:opacity-70 text-white font-medium py-2.5 rounded-lg transition-colors"
+              disabled={isLoading || lockTimeRemaining > 0}
+              className="w-full flex items-center justify-center gap-2 bg-blue-950 hover:bg-green-600 disabled:opacity-70 disabled:hover:bg-blue-950 text-white font-medium py-2.5 rounded-lg transition-colors"
             >
-              {isLoading ? 'Signing in...' : 'Sign in to workspace'}
+              {isLoading ? 'Signing in...' : lockTimeRemaining > 0 ? `Locked (${Math.ceil(lockTimeRemaining / 60)}m)` : 'Sign in to workspace'}
               <ArrowRight className="h-4 w-4" />
             </button>
           </form>
 
-          {/* registration link */}
           <p className="text-center text-sm text-slate-500 mt-6">
             Need an account?{' '}
             <Link to="/registration" className="text-blue-700 hover:underline font-medium">

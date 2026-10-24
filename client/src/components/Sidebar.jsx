@@ -34,8 +34,13 @@ const Sidebar = ({ logo, nav }) => {
 
             return (
               <Link key={item.label} to={item.to} className={linkClass}>
-                <Icon className="h-4 w-4" />
-                {item.label}
+                <div className="flex items-center gap-3 flex-1">
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </div>
+                {item.hasNotification && (
+                  <span className="h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.6)] animate-pulse" />
+                )}
               </Link>
             )
           })}

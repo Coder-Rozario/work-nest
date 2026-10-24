@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { Clock, Play, Pause, ChevronRight, AlertCircle, CheckCircle2 } from "lucide-react"
 import { employeeAPI, timeAttendanceAPI } from "../../services/api"
+import { useRealtime } from "../../hooks/useRealtime"
 
 function formatDurationFriendly(totalMinutes) {
   const minutes = Number(totalMinutes)
@@ -21,13 +22,9 @@ function formatDurationFriendly(totalMinutes) {
 
 function formatTime(value) {
   if (!value) return "-"
-  try {
-    const d = new Date(value)
-    if (!Number.isNaN(d.getTime())) {
-      return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
-    }
-  } catch {
-    // Ignore invalid timestamp formatting issues.
+  const d = new Date(value)
+  if (!Number.isNaN(d.getTime())) {
+    return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
   }
 
   if (typeof value === "string") {
@@ -44,13 +41,9 @@ function formatTime(value) {
 
 function formatDate(value) {
   if (!value) return "Unknown"
-  try {
-    const d = new Date(value)
-    if (!Number.isNaN(d.getTime())) {
-      return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-    }
-  } catch {
-    // Ignore invalid date formatting issues.
+  const d = new Date(value)
+  if (!Number.isNaN(d.getTime())) {
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
   }
 
   if (typeof value === "string") {
@@ -60,7 +53,6 @@ function formatDate(value) {
   return "Unknown"
 }
 
-// Convert a "HH:MM" (24-hour) office-time string to 12-hour format with AM/PM.
 function formatOfficeTime(value) {
   if (!value) return "-"
   const match = String(value).match(/^(\d{1,2}):(\d{2})/)
@@ -74,8 +66,6 @@ function formatOfficeTime(value) {
   return `${h}:${m} ${period}`
 }
 
-// Calculate the office shift length in hours from start/end "HH:MM" strings.
-// Handles overnight shifts (e.g. 20:00 - 10:00 = 14 hours).
 function getOfficeDurationHours(start, end) {
   if (!start || !end) return 8
   const [sh, sm] = String(start).split(":").map((n) => parseInt(n, 10) || 0)
@@ -92,24 +82,16 @@ function getSessionHours(log) {
   const safeMinutes = Number.isFinite(Number(log?.duration_minutes)) ? Number(log.duration_minutes) : 0
 
   if (log?.check_in && log?.check_out) {
-    try {
-      const diff = new Date(log.check_out).getTime() - new Date(log.check_in).getTime()
-      if (Number.isFinite(diff) && diff > 0) {
-        return Math.round((diff / 3600000) * 10) / 10
-      }
-    } catch {
-      // Ignore invalid timestamp differences.
+    const diff = new Date(log.check_out).getTime() - new Date(log.check_in).getTime()
+    if (Number.isFinite(diff) && diff > 0) {
+      return Math.round((diff / 3600000) * 10) / 10
     }
   }
 
   if (log?.check_in && !log?.check_out) {
-    try {
-      const diff = Date.now() - new Date(log.check_in).getTime()
-      if (Number.isFinite(diff) && diff > 0) {
-        return Math.round((diff / 3600000) * 10) / 10
-      }
-    } catch {
-      // Ignore invalid live session timing.
+    const diff = Date.now() - new Date(log.check_in).getTime()
+    if (Number.isFinite(diff) && diff > 0) {
+      return Math.round((diff / 3600000) * 10) / 10
     }
   }
 
@@ -124,24 +106,16 @@ function getSessionMinutes(log) {
   const safeMinutes = Number.isFinite(Number(log?.duration_minutes)) ? Math.round(Number(log.duration_minutes)) : 0
 
   if (log?.check_in && log?.check_out) {
-    try {
-      const diff = new Date(log.check_out).getTime() - new Date(log.check_in).getTime()
-      if (Number.isFinite(diff) && diff > 0) {
-        return Math.round(diff / 60000)
-      }
-    } catch {
-      // Ignore invalid timestamp differences.
+    const diff = new Date(log.check_out).getTime() - new Date(log.check_in).getTime()
+    if (Number.isFinite(diff) && diff > 0) {
+      return Math.round(diff / 60000)
     }
   }
 
   if (log?.check_in && !log?.check_out) {
-    try {
-      const diff = Date.now() - new Date(log.check_in).getTime()
-      if (Number.isFinite(diff) && diff > 0) {
-        return Math.round(diff / 60000)
-      }
-    } catch {
-      // Ignore invalid live session timing.
+    const diff = Date.now() - new Date(log.check_in).getTime()
+    if (Number.isFinite(diff) && diff > 0) {
+      return Math.round(diff / 60000)
     }
   }
 
@@ -155,16 +129,15 @@ function getSessionMinutes(log) {
 const EmployeeTimelog = () => {
   const [timeLogs, setTimeLogs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [isClocked, setIsClocked] = useState(false)
   const [expandedLog, setExpandedLog] = useState(null)
-  const [todaysHours, setTodaysHours] = useState(0)
   const [activeLogId, setActiveLogId] = useState(null)
   const [officeStart, setOfficeStart] = useState("09:00")
   const [officeEnd, setOfficeEnd] = useState("17:00")
+  const [tick, setTick] = useState(0)
 
-  const loadLogs = async () => {
+  const loadLogs = async ({ silent = false } = {}) => {
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       const response = await employeeAPI.getTimeLog()
       const logs = (response && Array.isArray(response.records)) ? response.records : (Array.isArray(response) ? response : [])
       setTimeLogs(logs)
@@ -173,30 +146,33 @@ const EmployeeTimelog = () => {
 
       const open = logs.find((l) => l.check_in && !l.check_out)
       if (open) {
-        setIsClocked(true)
         setActiveLogId(open.id)
       } else {
-        setIsClocked(false)
         setActiveLogId(null)
       }
-
-      const today = new Date().toDateString()
-      let total = 0
-      logs.forEach((l) => {
-        const checkInDate = l?.check_in ? new Date(l.check_in) : null
-        if (checkInDate && !Number.isNaN(checkInDate.getTime()) && checkInDate.toDateString() === today) {
-          total += getSessionHours(l)
-        }
-      })
-      setTodaysHours(total)
     } catch {
       setTimeLogs([])
-      setIsClocked(false)
       setActiveLogId(null)
     } finally {
       setLoading(false)
     }
   }
+
+  const isClocked = useMemo(() => {
+    return !!timeLogs.find((l) => l.check_in && !l.check_out)
+  }, [timeLogs])
+
+  const todaysHours = useMemo(() => {
+    const today = new Date().toDateString()
+    let total = 0
+    timeLogs.forEach((l) => {
+      const checkInDate = l?.check_in ? new Date(l.check_in) : null
+      if (checkInDate && !Number.isNaN(checkInDate.getTime()) && checkInDate.toDateString() === today) {
+        total += getSessionHours(l)
+      }
+    })
+    return total
+  }, [timeLogs, tick])
 
   useEffect(() => {
     let active = true
@@ -208,10 +184,19 @@ const EmployeeTimelog = () => {
 
     void init()
 
+    const intervalId = window.setInterval(() => {
+      setTick((t) => t + 1)
+    }, 60000)
+
     return () => {
       active = false
+      window.clearInterval(intervalId)
     }
   }, [])
+
+  useRealtime(["attendance"], () => {
+    void loadLogs({ silent: true })
+  })
 
   const dailyTarget = getOfficeDurationHours(officeStart, officeEnd)
 
@@ -224,7 +209,6 @@ const EmployeeTimelog = () => {
           note: "Clock in",
         })
         if (res && res.id) setActiveLogId(res.id)
-        setIsClocked(true)
       } else {
         const sessionId = activeLogId || timeLogs.find((log) => log.check_in && !log.check_out)?.id
         if (sessionId) {
@@ -233,7 +217,6 @@ const EmployeeTimelog = () => {
             note: "Clock out",
           })
         }
-        setIsClocked(false)
         setActiveLogId(null)
       }
       await loadLogs()
@@ -247,10 +230,8 @@ const EmployeeTimelog = () => {
   }
 
   const openLog = timeLogs.find((l) => l.check_in && !l.check_out)
-  // Show the actual check-in time when clocked in; otherwise show a static "Clocked Out" label
   const currentStatusTime = isClocked && openLog ? formatTime(openLog.check_in) : "Clocked Out"
 
-  // Determine today's clock-in status (On Time / Late) based on office hours
   const todayStr = new Date().toDateString()
   const todayLog = timeLogs.find((l) => {
     const d = l?.check_in ? new Date(l.check_in) : null

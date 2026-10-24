@@ -97,22 +97,26 @@ const getConversations = async (req, res) => {
        FROM users u
        LEFT JOIN teams t ON t.id = u.team_id
        WHERE u.id IN (?)
-       ORDER BY t.name ASC, u.full_name ASC`,
+       ORDER BY last_message_at DESC, u.full_name ASC`,
       [currentUserId, currentUserId, companyId, currentUserId, currentUserId, companyId, contactIds]
     );
 
-    const conversations = (rows || []).map((row) => ({
-      id: row.id,
-      full_name: row.full_name || row.email || 'Unknown User',
-      email: row.email || '',
-      role: String(row.role || 'employee').trim().toLowerCase(),
-      team_name: row.team_name || 'Unassigned Team',
-      team: row.team_name || 'Unassigned Team',
-      profile_photo: getProfilePhotoUrl(row.profile_photo),
-      content: normalizeMessageText({ encrypted_text: row.last_message }),
-      encrypted_text: normalizeMessageText({ encrypted_text: row.last_message }),
-      created_at: row.last_message_at,
-    }));
+    const conversations = (rows || []).map((row) => {
+      const profilePhoto = getProfilePhotoUrl(row.profile_photo);
+      return {
+        id: row.id,
+        full_name: row.full_name || row.email || 'Unknown User',
+        email: row.email || '',
+        role: String(row.role || 'employee').trim().toLowerCase(),
+        team_name: row.team_name || 'Unassigned Team',
+        team: row.team_name || 'Unassigned Team',
+        profile_photo: profilePhoto,
+        profilePhoto: profilePhoto,
+        content: normalizeMessageText({ encrypted_text: row.last_message }),
+        encrypted_text: normalizeMessageText({ encrypted_text: row.last_message }),
+        created_at: row.last_message_at,
+      };
+    });
 
     res.status(200).json({ success: true, data: conversations });
   } catch (error) {

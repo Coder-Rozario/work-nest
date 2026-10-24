@@ -16,6 +16,8 @@ const messageRoutes = require('./routes/messageRoutes');
 const projectRoutes = require('./routes/projectRoutes');
 const timeAttendanceRoutes = require('./routes/timeAttendanceRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const realtimeRoutes = require('./routes/realtimeRoutes');
+const realtimeBroadcast = require('./middleware/realtimeBroadcast');
 
 
 const app = express();
@@ -39,13 +41,17 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // static
 
 
 app.get('/api/health', (req, res) => {
-    res.status(200).json({ success: true, message: 'Server is running.' });
+  // health
+  res.status(200).json({ success: true, message: 'Server is running.' });
 });
 
+app.use(realtimeBroadcast); // broadcast write operations to connected clients
+
+app.use('/api/realtime', realtimeRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
 app.use('/api/manager', authMiddleware, managerRoutes);
@@ -58,15 +64,17 @@ app.use('/api/reports', authMiddleware, reportRoutes);
 app.post('/api/users/profile-photo', authMiddleware, uploadProfilePhoto.single('photo'), async (req, res) => {
   try {
     if (!req.file) {
+      // guard
       return res.status(400).json({ success: false, message: 'Profile photo is required.' });
     }
 
-    const relativePath = `/uploads/companies/${req.user.company_id}/${req.file.filename}`;
+    const { getCompanyUploadUrl } = require('./utils/upload');
+    const relativePath = getCompanyUploadUrl(req.user, req.file.filename); // path
 
     await require('./config/database').query(
       'UPDATE users SET profile_photo = ? WHERE id = ? AND company_id = ?',
       [relativePath, req.user.id, req.user.company_id]
-    );
+    ); // save
 
     res.status(200).json({
       success: true,
@@ -76,6 +84,7 @@ app.post('/api/users/profile-photo', authMiddleware, uploadProfilePhoto.single('
       },
     });
   } catch (error) {
+    // fail
     console.error('Upload profile image error:', error);
     res.status(500).json({ success: false, message: 'Could not upload profile photo.' });
   }

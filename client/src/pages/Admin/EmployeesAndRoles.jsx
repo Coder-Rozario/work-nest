@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Plus, Trash2, Search } from "lucide-react";
 import { adminAPI } from "../../services/api";
+import useRealtime from "../../hooks/useRealtime";
 
 const roles = ["Manager", "Employee", "Admin"];
 
@@ -75,6 +76,10 @@ const EmployeesAndRoles = () => {
     };
     loadData();
   }, []);
+
+  useRealtime(['employees', 'teams'], () => {
+    void Promise.all([fetchEmployees(), fetchTeams()]);
+  });
 
   const filteredEmployees = employeeList.filter((employee) => {
     const searchValue = searchTerm.toLowerCase()
@@ -258,7 +263,7 @@ const EmployeesAndRoles = () => {
 
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6">
+          <div className="w-full max-h-[90vh] max-w-md overflow-y-auto rounded-xl bg-white p-6">
             <h2 className="mb-4 text-lg font-semibold text-slate-900">Add Employee</h2>
             <div className="space-y-4">
               <div>
@@ -323,7 +328,7 @@ const EmployeesAndRoles = () => {
 
       {showEditModal && selectedEmployee && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6">
+          <div className="w-full max-h-[90vh] max-w-md overflow-y-auto rounded-xl bg-white p-6">
             <h2 className="mb-4 text-lg font-semibold text-slate-900">Edit Employee</h2>
             <div className="space-y-4">
               <div>

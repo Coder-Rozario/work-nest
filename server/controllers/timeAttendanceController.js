@@ -2,11 +2,7 @@ const db = require('../config/database');
 
 const pad = (n) => String(n).padStart(2, '0');
 
-// Convert a stored profile photo value into a publicly accessible URL.
-// Values may be an absolute URL, a full relative path like
-// "/uploads/companies/123/abc.jpg", a path like "companies/123/abc.jpg",
-// or just a bare filename. In the bare-filename case we need the company id
-// to build the correct "/uploads/companies/{companyId}/{filename}" URL.
+
 const getProfilePhotoUrl = (photo, companyId) => {
   if (!photo) return '';
   const str = String(photo).trim();
@@ -19,8 +15,7 @@ const getProfilePhotoUrl = (photo, companyId) => {
   return `/uploads/companies/${companyId}/${str}`;
 };
 
-// Convert any incoming date value (ISO string, Date, or already-formatted string)
-// into a local-time YYYY-MM-DD HH:MM:SS string so MySQL stores the correct local time.
+
 const normalizeDateTime = (value) => {
   if (value === null || value === undefined || value === '') return null;
 

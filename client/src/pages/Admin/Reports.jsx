@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { BarChart3, Users, FolderKanban, CheckSquare, Clock3, TrendingUp } from "lucide-react";
 import { adminAPI, taskAPI, timeAttendanceAPI } from "../../services/api";
+import useRealtime from "../../hooks/useRealtime";
 
 const toNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -18,10 +19,12 @@ const AdminReports = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const fetchDataRef = useRef(null);
+
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchData = async ({ silent = false } = {}) => {
       try {
-        setLoading(true);
+        if (!silent) setLoading(true);
         const results = await Promise.allSettled([
           adminAPI.getDashboard(),
           adminAPI.getEmployees(),
@@ -43,12 +46,21 @@ const AdminReports = () => {
         console.error("Error loading reports:", err);
         setError(err.message || "Failed to load reports");
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     };
 
-    fetchData();
+    fetchDataRef.current = fetchData;
+    void fetchData();
+
+    return () => {
+      fetchDataRef.current = null;
+    };
   }, []);
+
+  useRealtime(['tasks', 'projects', 'attendance', 'reports'], () => {
+    if (fetchDataRef.current) void fetchDataRef.current({ silent: true });
+  });
 
   const totalEmployees = useMemo(
     () => toNumber(dashboard.total_employees, employees.length),

@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Mail, Phone, MapPin, Lock, Save, Upload } from "lucide-react"
 import { employeeAPI } from "../../services/api"
 import ChangePasswordModal from "../../components/ChangePasswordModal"
 import { getAssetUrl, getApiUrl } from "../../config/env"
+import { useRealtime } from "../../hooks/useRealtime"
 
 const buildImageUrl = (photo) => {
   if (!photo) return ""
@@ -17,9 +18,9 @@ const EmployeeMyProfile = () => {
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [uploading, setUploading] = useState(false)
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       const data = await employeeAPI.getProfile()
       const fullNameFromApi = data?.full_name || `${data?.first_name || ""} ${data?.last_name || ""}`.trim()
       setProfileData(data && typeof data === "object" ? data : {})
@@ -38,11 +39,18 @@ const EmployeeMyProfile = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    loadProfile()
-  }, [])
+    const timer = setTimeout(() => {
+      loadProfile()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [loadProfile])
+
+  useRealtime(["profile"], () => {
+    void loadProfile({ silent: true })
+  })
 
   const handleInputChange = (e) => {
     const name = e.target.name

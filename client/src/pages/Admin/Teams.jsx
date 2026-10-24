@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Plus, Users, Search } from "lucide-react";
 import { adminAPI, projectAPI } from "../../services/api";
+import useRealtime from "../../hooks/useRealtime";
 
 const mapTeam = (t) => ({
   ...t,
@@ -59,16 +60,11 @@ const AdminTeams = () => {
     load();
   }, []);
 
-  const groupedEmployees = useMemo(() => {
-    const managers = employeeList
-      .filter((person) => String(person.role || "").toLowerCase() === "manager")
-      .map((person) => ({
-        value: String(person.id),
-        label: person.full_name || `${person.first_name || ""} ${person.last_name || ""}`.trim() || person.email || "Manager",
-      }));
+  useRealtime(['teams', 'employees', 'projects'], () => {
+    void Promise.all([fetchTeams(), fetchEmployees()]);
+  });
 
-    return { managers };
-  }, [employeeList]);
+
 
   const filteredTeams = useMemo(() => {
     const q = searchTerm.trim().toLowerCase()
@@ -137,70 +133,57 @@ const AdminTeams = () => {
   }
 
   const openEditModal = (team) => {
-    const matchedLeader = employeeList.find((person) => {
+    const teamId = team.id;
+    const membersInTeam = employeeList.filter(p => String(p.team_id || p.teamId) === String(teamId));
+    
+    let matchedLeader = employeeList.find((person) => {
       const savedName = person.full_name || `${person.first_name || ""} ${person.last_name || ""}`.trim();
       return String(person.id) === String(team.leader_id || "") || savedName === String(team.leader || "").trim();
     });
+
+    // Default to manager if no leader matched
+    if (!matchedLeader) {
+      matchedLeader = membersInTeam.find(m => String(m.role).toLowerCase() === "manager");
+    }
 
     setSelectedTeam(team)
     setFormData({
       name: team.name || "",
       description: team.description || "",
-      leader: team.leader || "",
+      leader: matchedLeader ? (matchedLeader.full_name || `${matchedLeader.first_name || ""} ${matchedLeader.last_name || ""}`.trim()) : (team.leader || ""),
       leaderId: matchedLeader ? String(matchedLeader.id) : "",
       members: team.members || 1,
     })
     setShowEditModal(true)
   }
 
-  const handleLeaderSelect = (selectedId) => {
-    const person = employeeList.find((emp) => String(emp.id) === String(selectedId));
-    const fullName = person ? (person.full_name || `${person.first_name || ""} ${person.last_name || ""}`.trim()) : "";
-    updateForm({ leaderId: selectedId || "", leader: fullName || "" });
-  };
 
-  const currentLeader = useMemo(() => {
-    if (!selectedTeam) return null;
-
-    const leaderId = selectedTeam.leader_id || selectedTeam.leaderId;
-    if (leaderId) {
-      const match = employeeList.find((person) => String(person.id) === String(leaderId));
-      if (match) return match;
-    }
-
-    const leaderName = String(selectedTeam.leader || "").trim();
-    if (!leaderName) return null;
-
-    return employeeList.find((person) => {
-      const name = person.full_name || `${person.first_name || ""} ${person.last_name || ""}`.trim();
-      return name.toLowerCase() === leaderName.toLowerCase();
-    }) || { first_name: leaderName, last_name: "", position: "Manager", role: "manager" };
-  }, [employeeList, selectedTeam]);
-
-  const currentMembers = useMemo(() => {
+  const teamMembers = useMemo(() => {
     if (!selectedTeam) return [];
-
-    const leaderId = selectedTeam.leader_id || selectedTeam.leaderId;
-
     return employeeList.filter((person) => {
       const teamId = person.team_id ?? person.teamId;
-      const isInTeam = String(teamId) === String(selectedTeam.id);
-      const isLeader = String(person.id) === String(leaderId || "");
-      return isInTeam && !isLeader && String(person.role || "").toLowerCase() !== "admin";
+      return String(teamId) === String(selectedTeam.id) && String(person.role || "").toLowerCase() !== "admin";
     });
   }, [employeeList, selectedTeam]);
+
+  const handleSetLeader = (memberId) => {
+     const member = employeeList.find(m => String(m.id) === String(memberId));
+     if (!member) return;
+     
+     updateForm({
+       leaderId: String(member.id),
+       leader: member.full_name || `${member.first_name || ""} ${member.last_name || ""}`.trim()
+     });
+   };
 
   const availableMembers = useMemo(() => {
     if (!selectedTeam) return [];
 
-    const leaderId = selectedTeam.leader_id || selectedTeam.leaderId;
-
     return employeeList.filter((person) => {
       const teamId = person.team_id ?? person.teamId;
       const isInTeam = String(teamId) === String(selectedTeam.id);
-      const isLeader = String(person.id) === String(leaderId || "");
       const isAdmin = String(person.role || "").toLowerCase() === "admin";
-      return !isInTeam && !isLeader && !isAdmin;
+      return !isInTeam && !isAdmin;
     });
   }, [employeeList, selectedTeam]);
 
@@ -217,6 +200,11 @@ const AdminTeams = () => {
         team_id: null,
         is_active: member.is_active !== undefined ? member.is_active : 1,
       });
+
+      // If the removed member was the leader, clear leader
+      if (String(member.id) === String(formData.leaderId)) {
+        updateForm({ leaderId: "", leader: "" });
+      }
 
       await Promise.all([fetchEmployees(), fetchTeams()]);
     } catch (err) {
@@ -241,6 +229,11 @@ const AdminTeams = () => {
         team_id: selectedTeam.id,
         is_active: member.is_active !== undefined ? member.is_active : 1,
       });
+
+      // If assigning a manager and no leader is set, default to manager
+      if (String(member.role).toLowerCase() === "manager" && !formData.leaderId) {
+        handleSetLeader(member.id);
+      }
 
       await Promise.all([fetchEmployees(), fetchTeams()]);
     } catch (err) {
@@ -358,29 +351,7 @@ const AdminTeams = () => {
                 />
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Team Leader 
-                </label>
-                <select
-                  value={formData.leaderId || ""}
-                  onChange={(event) => handleLeaderSelect(event.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select a team leader</option>
-                  {groupedEmployees.managers.length > 0 && (
-                    <optgroup label="Managers">
-                      {groupedEmployees.managers.map((person) => (
-                        <option key={person.value} value={person.value}>{person.label}</option>
-                      ))}
-                    </optgroup>
-                  )}
 
-                  {groupedEmployees.managers.length === 0 && (
-                    <option value="" disabled>No managers available</option>
-                  )}
-                </select>
-              </div>
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -436,29 +407,7 @@ const AdminTeams = () => {
                 />
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Team Leader <span className="text-xs text-slate-400">(optional)</span>
-                </label>
-                <select
-                  value={formData.leaderId || ""}
-                  onChange={(event) => handleLeaderSelect(event.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select a team leader</option>
-                  {groupedEmployees.managers.length > 0 && (
-                    <optgroup label="Managers">
-                      {groupedEmployees.managers.map((person) => (
-                        <option key={person.value} value={person.value}>{person.label}</option>
-                      ))}
-                    </optgroup>
-                  )}
 
-                  {groupedEmployees.managers.length === 0 && (
-                    <option value="" disabled>No managers available</option>
-                  )}
-                </select>
-              </div>
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -474,49 +423,52 @@ const AdminTeams = () => {
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <h3 className="mb-2 text-sm font-semibold text-slate-700">Team Leader</h3>
-                {currentLeader ? (
-                  <div className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2">
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">
-                        {currentLeader.full_name || `${currentLeader.first_name || ""} ${currentLeader.last_name || ""}`.trim() || currentLeader.email || "Unnamed leader"}
-                      </p>
-                      <p className="text-xs text-slate-500">{currentLeader.position || "Manager"}</p>
-                    </div>
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
-                      Leader
-                    </span>
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-500">No team leader assigned.</p>
-                )}
-
-                <h3 className="mb-2 mt-4 text-sm font-semibold text-slate-700">Team Members</h3>
+                <h3 className="mb-2 text-sm font-semibold text-slate-700">Team Members</h3>
                 <div className="space-y-2">
-                  {currentMembers.length > 0 ? (
-                    currentMembers.map((member) => (
-                      <div key={member.id} className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2">
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">
-                            {member.full_name || `${member.first_name || ""} ${member.last_name || ""}`.trim() || member.email || "Unnamed member"}
-                          </p>
-                          <p className="text-xs text-slate-500">{member.position || "Employee"}</p>
+                  {teamMembers.length > 0 ? (
+                    teamMembers.map((member) => {
+                      const isLeader = String(member.id) === String(formData.leaderId);
+                      return (
+                        <div key={member.id} className={`flex items-center justify-between rounded-md border px-3 py-2 transition ${isLeader ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'}`}>
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-slate-900">
+                                {member.full_name || `${member.first_name || ""} ${member.last_name || ""}`.trim() || member.email || "Unnamed member"}
+                              </p>
+                              <p className="text-xs text-slate-500">{member.position || "Employee"}</p>
+                            </div>
+                            {isLeader && (
+                              <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                Leader
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {!isLeader ? (
+                              <button
+                                onClick={() => handleSetLeader(member.id)}
+                                className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-200"
+                              >
+                                Set as Leader
+                              </button>
+                            ) : (
+                                <span className="text-[10px] font-medium text-blue-600 uppercase tracking-tight">Current Leader</span>
+                            )}
+                            <button
+                              onClick={() => handleRemoveMember(member)}
+                              className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-200"
+                            >
+                              Remove
+                            </button>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                              {String(member.role || "employee").charAt(0).toUpperCase() + String(member.role || "employee").slice(1)}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleRemoveMember(member)}
-                            className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-200"
-                          >
-                            Remove
-                          </button>
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                            {String(member.role || "employee").charAt(0).toUpperCase() + String(member.role || "employee").slice(1)}
-                          </span>
-                        </div>
-                      </div>
-                    ))
+                      )
+                    })
                   ) : (
-                    <p className="text-sm text-slate-500">No members assigned to this team yet.</p>
+                    <p className="text-sm text-slate-500 text-center py-2">No members assigned to this team yet.</p>
                   )}
                 </div>
               </div>

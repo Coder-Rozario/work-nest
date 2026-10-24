@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import {
   BarChart3,
   BriefcaseBusiness,
@@ -16,36 +16,48 @@ import Header from "../components/Header"
 import Sidebar from "../components/Sidebar"
 import logo from "../assets/logo.svg"
 import { authAPI } from "../services/api"
+import { connectRealtime, disconnectRealtime, subscribeRealtime } from "../services/realtime"
+
+const resourceToPathMap = {
+  messages: ["/admin/messages", "/manager/messages", "/employee/messages"],
+  meetings: ["/admin/meetings", "/manager/meetings", "/employee/meetings"],
+  tasks: ["/admin/tasks", "/manager/tasks", "/employee/my-tasks"],
+  projects: ["/admin/projects", "/manager/projects", "/employee/my-projects"],
+  attendance: ["/admin/time-attendance", "/manager/time-attendance", "/employee/time-log"],
+  teams: ["/admin/teams", "/manager/my-team", "/employee/my-team"],
+  employees: ["/admin/employees"],
+  reports: ["/admin/reports", "/manager/reports"],
+}
 
 const navByRole = {
   admin: [
     { label: "Overview", icon: LayoutGrid, to: "/admin/overview" },
-    { label: "Teams", icon: UserRound, to: "/Admin/teams" },
-    { label: "Employees", icon: Users, to: "/Admin/employees" },
-    { label: "Projects", icon: FolderKanban, to: "/Admin/projects" },
-    { label: "Time & Attendance", icon: CalendarClock, to: "/Admin/time-attendance" },
-    { label: "Meetings", icon: BriefcaseBusiness, to: "/Admin/meetings" },
-    { label: "Messages", icon: MessageSquareText, to: "/Admin/messages" },
-    { label: "Reports", icon: BarChart3, to: "/Admin/reports" },
+    { label: "Teams", icon: UserRound, to: "/Admin/teams", resource: "teams" },
+    { label: "Employees", icon: Users, to: "/Admin/employees", resource: "employees" },
+    { label: "Projects", icon: FolderKanban, to: "/Admin/projects", resource: "projects" },
+    { label: "Time & Attendance", icon: CalendarClock, to: "/Admin/time-attendance", resource: "attendance" },
+    { label: "Meetings", icon: BriefcaseBusiness, to: "/Admin/meetings", resource: "meetings" },
+    { label: "Messages", icon: MessageSquareText, to: "/Admin/messages", resource: "messages" },
+    { label: "Reports", icon: BarChart3, to: "/Admin/reports", resource: "reports" },
   ],
   manager: [
     { label: "Overview", icon: LayoutGrid, to: "/manager/overview" },
-    { label: "My Team", icon: Users, to: "/manager/my-team" },
-    { label: "Projects", icon: FolderKanban, to: "/manager/projects" },
-    { label: "Tasks", icon: ClipboardList, to: "/manager/tasks" },
-    { label: "Time & Attendance", icon: CalendarClock, to: "/manager/time-attendance" },
-    { label: "Meetings", icon: BriefcaseBusiness, to: "/manager/meetings" },
-    { label: "Messages", icon: MessageSquareText, to: "/manager/messages" },
-    { label: "Reports", icon: BarChart3, to: "/manager/reports" },
+    { label: "My Team", icon: Users, to: "/manager/my-team", resource: "teams" },
+    { label: "Projects", icon: FolderKanban, to: "/manager/projects", resource: "projects" },
+    { label: "Tasks", icon: ClipboardList, to: "/manager/tasks", resource: "tasks" },
+    { label: "Time & Attendance", icon: CalendarClock, to: "/manager/time-attendance", resource: "attendance" },
+    { label: "Meetings", icon: BriefcaseBusiness, to: "/manager/meetings", resource: "meetings" },
+    { label: "Messages", icon: MessageSquareText, to: "/manager/messages", resource: "messages" },
+    { label: "Reports", icon: BarChart3, to: "/manager/reports", resource: "reports" },
   ],
   employee: [
     { label: "Overview", icon: LayoutGrid, to: "/employee/overview" },
-    { label: "My Team", icon: Users, to: "/employee/my-team" },
-    { label: "My Tasks", icon: ClipboardList, to: "/employee/my-tasks" },
-    { label: "My Projects", icon: FolderKanban, to: "/employee/my-projects" },
-    { label: "Time Log", icon: CalendarClock, to: "/employee/time-log" },
-    { label: "Meetings", icon: BriefcaseBusiness, to: "/employee/meetings" },
-    { label: "Messages", icon: MessageSquareText, to: "/employee/messages" },
+    { label: "My Team", icon: Users, to: "/employee/my-team", resource: "teams" },
+    { label: "My Tasks", icon: ClipboardList, to: "/employee/my-tasks", resource: "tasks" },
+    { label: "My Projects", icon: FolderKanban, to: "/employee/my-projects", resource: "projects" },
+    { label: "Time Log", icon: CalendarClock, to: "/employee/time-log", resource: "attendance" },
+    { label: "Meetings", icon: BriefcaseBusiness, to: "/employee/meetings", resource: "meetings" },
+    { label: "Messages", icon: MessageSquareText, to: "/employee/messages", resource: "messages" },
   ],
 }
 
@@ -93,6 +105,61 @@ const PageLayouts = () => {
   const navigate = useNavigate()
   const [currentUser, setCurrentUser] = useState(null)
   const [isLoadingUser, setIsLoadingUser] = useState(true)
+  const [notifications, setNotifications] = useState({})
+
+  const pathRef = useRef(location.pathname)
+  useEffect(() => {
+    pathRef.current = location.pathname
+  }, [location.pathname])
+
+  // Keeps one realtime stream open for every page rendered inside this layout.
+  useEffect(() => {
+    connectRealtime()
+    
+    const unsubscribe = subscribeRealtime((event) => {
+      const resource = event.resource
+      if (!resource) return
+
+      // Don't notify if user is already on a path associated with this resource
+      const associatedPaths = resourceToPathMap[resource] || []
+      const isCurrentPathAssociated = associatedPaths.some(p => 
+        pathRef.current.toLowerCase() === p.toLowerCase()
+      )
+
+      if (!isCurrentPathAssociated) {
+        setNotifications(prev => ({
+          ...prev,
+          [resource]: true
+        }))
+      }
+    })
+
+    return () => {
+      disconnectRealtime()
+      unsubscribe()
+    }
+  }, [])
+
+  // Clear notifications when path changes
+  useEffect(() => {
+    const currentPath = location.pathname.toLowerCase()
+    let resourceToClear = null
+    
+    for (const [resource, paths] of Object.entries(resourceToPathMap)) {
+      if (paths.some(p => p.toLowerCase() === currentPath)) {
+        resourceToClear = resource
+        break
+      }
+    }
+
+    if (resourceToClear && notifications[resourceToClear]) {
+      setNotifications(prev => {
+        const next = { ...prev }
+        delete next[resourceToClear]
+        return next
+      })
+    }
+  }, [location.pathname, notifications])
 
   useEffect(() => {
     const loadUser = async () => {
@@ -118,7 +185,7 @@ const PageLayouts = () => {
           try {
             await refreshUser()
           } catch {
-            // no-op
+            // Silently ignore refresh failure if we already have saved data
           }
 
           setIsLoadingUser(false)
@@ -149,8 +216,9 @@ const PageLayouts = () => {
     return items.map((item) => ({
       ...item,
       active: location.pathname === item.to,
+      hasNotification: !!(item.resource && notifications[item.resource])
     }))
-  }, [location.pathname, role])
+  }, [location.pathname, role, notifications])
 
   if (isLoadingUser) {
     return <div className="flex h-screen items-center justify-center bg-slate-100 text-slate-600">Loading workspace...</div>

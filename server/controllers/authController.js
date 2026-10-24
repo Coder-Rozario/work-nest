@@ -3,9 +3,21 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 const db = require('../config/database');
+const { sendResetCodeEmail } = require('../utils/mailer');
 
-const MAX_FAILED_LOGIN_ATTEMPTS = 3;
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
+const MAX_RESEND_ATTEMPTS = 10;
+const RESET_CODE_TTL_MINUTES = 15;
+
+const pad = (n) => String(n).padStart(2, '0');
+
+const normalizeDateTime = (value) => {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
 
 const createToken = (user) => {
   return jwt.sign(
@@ -53,6 +65,29 @@ const normalizeUserResponse = (user) => ({
   profile_photo: getProfilePhotoUrl(user.profile_photo),
 });
 
+const normalizeText = (value) => String(value || '').trim();
+
+const identityMatches = (user, { name, position }) => {
+  if (!user) return false;
+  return (
+    normalizeText(user.full_name).toLowerCase() === name.toLowerCase() &&
+    normalizeText(user.position).toLowerCase() === position.toLowerCase()
+  );
+};
+
+const findIdentityUser = async (email) => {
+  const [rows] = await db.query(
+    `SELECT u.*, c.company_name
+     FROM users u
+     LEFT JOIN companies c ON c.id = u.company_id
+     WHERE LOWER(u.email) = ? AND u.is_active = 1
+     ORDER BY u.id DESC LIMIT 1`,
+    [email]
+  );
+
+  return rows[0] || null;
+};
+
 const requestPasswordReset = async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -60,99 +95,132 @@ const requestPasswordReset = async (req, res) => {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const email = String(req.body.email || '').trim().toLowerCase();
-    const userRows = await db.query(
-      'SELECT id, email, is_active FROM users WHERE LOWER(email) = ? LIMIT 1',
-      [email]
+    const name = normalizeText(req.body.name);
+    const position = normalizeText(req.body.position);
+    const email = normalizeText(req.body.email).toLowerCase();
+
+    const user = await findIdentityUser(email);
+
+    if (!identityMatches(user, { name, position })) {
+      return res.status(400).json({
+        success: false,
+        message: 'The name, email and position you entered do not match an active account.',
+      });
+    }
+
+    const [existingRows] = await db.query(
+      'SELECT id, resend_count, expires_at FROM password_resets WHERE user_id = ? AND used_at IS NULL ORDER BY id DESC LIMIT 1',
+      [user.id]
     );
 
-    const user = userRows[0]?.[0];
-    if (!user || Number(user.is_active) !== 1) {
-      return res.status(200).json({
-        success: true,
-        message: 'If this account exists, a reset code has been generated.',
-      });
+    const existing = existingRows[0];
+    let resendCount = 0;
+
+    // Only count a resend while the previous code is still valid.
+    if (existing && new Date(existing.expires_at).getTime() > Date.now()) {
+      resendCount = Number(existing.resend_count || 0);
+      if (resendCount >= MAX_RESEND_ATTEMPTS) {
+        return res.status(429).json({
+          success: false,
+          message: 'You have reached the maximum number of resend attempts. Please try again later.',
+          resend_remaining: 0,
+        });
+      }
+      resendCount += 1;
     }
 
     const resetCode = generateResetCode();
     const tokenHash = hashResetCode(resetCode);
 
+    // Keep only the newest code valid for this account.
     await db.query('DELETE FROM password_resets WHERE user_id = ?', [user.id]);
     await db.query(
-      'INSERT INTO password_resets (user_id, email, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 15 MINUTE))',
-      [user.id, user.email, tokenHash]
+      'INSERT INTO password_resets (user_id, email, token_hash, resend_count, expires_at) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))',
+      [user.id, user.email, tokenHash, resendCount, RESET_CODE_TTL_MINUTES]
     );
+
+    await sendResetCodeEmail({
+      to: user.email,
+      name: user.full_name,
+      code: resetCode,
+      expiresInMinutes: RESET_CODE_TTL_MINUTES,
+    });
 
     return res.status(200).json({
       success: true,
-      message: 'Reset code created successfully. Use it to set a new password.',
-      reset_code: resetCode,
-      expires_in_minutes: 15,
+      message: `A verification code has been sent to your registered email (${user.email}).`,
+      resend_remaining: MAX_RESEND_ATTEMPTS - resendCount,
+      expires_in_minutes: RESET_CODE_TTL_MINUTES,
     });
   } catch (error) {
     console.error('Request password reset error:', error);
-    return res.status(500).json({ success: false, message: 'Could not generate reset code.' });
+
+    if (error.code === 'SMTP_NOT_CONFIGURED') {
+      return res.status(500).json({
+        success: false,
+        message: 'The email service is not configured on the server. Please contact your administrator.',
+      });
+    }
+
+    return res.status(500).json({ success: false, message: 'Could not send the verification code. Please try again.' });
   }
 };
 
-const resetPassword = async (req, res) => {
+const verifyResetCode = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const email = String(req.body.email || '').trim().toLowerCase();
-    const resetCode = String(req.body.reset_code || '').trim();
-    const newPassword = String(req.body.new_password || '');
+    const name = normalizeText(req.body.name);
+    const position = normalizeText(req.body.position);
+    const email = normalizeText(req.body.email).toLowerCase();
+    const code = normalizeText(req.body.code);
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: 'New password must be at least 6 characters long.' });
+    const user = await findIdentityUser(email);
+
+    if (!identityMatches(user, { name, position })) {
+      return res.status(400).json({
+        success: false,
+        message: 'The name, email and position you entered do not match an active account.',
+      });
     }
 
     const [resetRows] = await db.query(
-      'SELECT * FROM password_resets WHERE LOWER(email) = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1',
-      [email]
+      'SELECT * FROM password_resets WHERE user_id = ? AND used_at IS NULL ORDER BY id DESC LIMIT 1',
+      [user.id]
     );
 
     const resetEntry = resetRows[0];
     if (!resetEntry) {
-      return res.status(400).json({ success: false, message: 'Reset code is invalid or has already been used.' });
+      return res.status(400).json({ success: false, message: 'No active verification code found. Please request a new code.' });
     }
 
-    if (hashResetCode(resetCode) !== resetEntry.token_hash) {
-      return res.status(400).json({ success: false, message: 'Reset code is invalid.' });
+    if (new Date(resetEntry.expires_at).getTime() <= Date.now()) {
+      await db.query('UPDATE password_resets SET used_at = NOW() WHERE id = ?', [resetEntry.id]);
+      return res.status(400).json({ success: false, message: 'The verification code has expired. Please request a new code.' });
     }
 
-    const [expiryRows] = await db.query(
-      'SELECT NOW() > expires_at AS expired FROM password_resets WHERE id = ?',
-      [resetEntry.id]
-    );
-
-    if (expiryRows[0]?.expired) {
-      await db.query('UPDATE password_resets SET used_at = ? WHERE id = ?', [new Date(), resetEntry.id]);
-      return res.status(400).json({ success: false, message: 'Reset code has expired. Please request a new one.' });
+    if (hashResetCode(code) !== resetEntry.token_hash) {
+      return res.status(400).json({ success: false, message: 'The verification code is incorrect.' });
     }
 
-    const [userRows] = await db.query('SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
-    const user = userRows[0];
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'Account not found.' });
-    }
+    await db.query('UPDATE password_resets SET used_at = NOW() WHERE id = ?', [resetEntry.id]);
+    await db.query('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?', [user.id]);
 
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(newPassword, salt);
-
-    await db.query('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, user.id]);
-    await db.query('UPDATE password_resets SET used_at = ? WHERE id = ?', [new Date(), resetEntry.id]);
+    // Valid code grants direct account access; the password can be changed from the profile afterwards.
+    const token = createToken(user);
 
     return res.status(200).json({
       success: true,
-      message: 'Password reset successful. You can now log in with your new password.',
+      message: 'Verification successful.',
+      token,
+      user: normalizeUserResponse(user),
     });
   } catch (error) {
-    console.error('Reset password error:', error);
-    return res.status(500).json({ success: false, message: 'Could not reset password.' });
+    console.error('Verify reset code error:', error);
+    return res.status(500).json({ success: false, message: 'Could not verify the code. Please try again.' });
   }
 };
 
@@ -300,7 +368,7 @@ const loginUser = async (req, res) => {
 
       await db.query(
         'UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?',
-        [nextFailedAttempts, lockUntil ? lockUntil.toISOString().slice(0, 19).replace('T', ' ') : null, user.id]
+        [nextFailedAttempts, lockUntil ? normalizeDateTime(lockUntil) : null, user.id]
       );
 
       if (nextFailedAttempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
@@ -396,5 +464,5 @@ module.exports = {
   getCurrentUser,
   changePassword,
   requestPasswordReset,
-  resetPassword,
+  verifyResetCode,
 };

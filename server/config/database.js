@@ -85,7 +85,6 @@ const ensureDatabaseTables = async () => {
       team_id INT DEFAULT NULL,
       profile_photo VARCHAR(500) DEFAULT '',
       is_active TINYINT(1) NOT NULL DEFAULT 1,
-      last_login_at TIMESTAMP NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY unique_company_email (company_id, email),
@@ -141,7 +140,7 @@ const ensureDatabaseTables = async () => {
       company_id INT NOT NULL,
       name VARCHAR(150) NOT NULL,
       description TEXT,
-      team_name VARCHAR(150) DEFAULT NULL,
+      team_name VARCHAR(255) DEFAULT NULL,
       start_date DATE DEFAULT NULL,
       due_date DATE DEFAULT NULL,
       progress INT NOT NULL DEFAULT 0,
@@ -156,6 +155,13 @@ const ensureDatabaseTables = async () => {
       CONSTRAINT fk_projects_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+
+  // Widen team_name for multi-team assignments
+  const [projectColumns] = await promisePool.query('SHOW COLUMNS FROM projects');
+  const teamNameColumn = (projectColumns || []).find((column) => column.Field === 'team_name');
+  if (teamNameColumn && Number(String(teamNameColumn.Type).replace(/\D/g, '')) < 255) {
+    await promisePool.query('ALTER TABLE projects MODIFY COLUMN team_name VARCHAR(255) DEFAULT NULL');
+  }
 
   await promisePool.query(`
     CREATE TABLE IF NOT EXISTS tasks (
@@ -175,8 +181,6 @@ const ensureDatabaseTables = async () => {
       submitted_at TIMESTAMP NULL,
       manager_feedback TEXT,
       review_comment TEXT,
-      reviewed_by INT DEFAULT NULL,
-      approved_at TIMESTAMP NULL,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -184,7 +188,6 @@ const ensureDatabaseTables = async () => {
       KEY idx_assignee (assignee_id),
       CONSTRAINT fk_tasks_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
       CONSTRAINT fk_tasks_assignee FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE SET NULL,
-      CONSTRAINT fk_tasks_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
       CONSTRAINT fk_tasks_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
@@ -276,6 +279,11 @@ const ensureDatabaseTables = async () => {
       KEY idx_reset_user (user_id),
       CONSTRAINT fk_password_resets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  await promisePool.query(`
+    ALTER TABLE password_resets
+      ADD COLUMN IF NOT EXISTS resend_count INT NOT NULL DEFAULT 0
   `);
 
   await promisePool.query(`

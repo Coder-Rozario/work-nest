@@ -16,7 +16,6 @@ const roleDashboardRoute = (role) => {
 const Registration = () => {
   const navigate = useNavigate()
 
-  // state variables for form fields
   const [companyName, setCompanyName] = useState('')
   const [companySize, setCompanySize] = useState('')
   const [industry, setIndustry] = useState('')
@@ -26,13 +25,10 @@ const Registration = () => {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [agreeToTerms, setAgreeToTerms] = useState(false)
 
-  // messages and loading
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-
-  // if user already logged in take to dashboard
   useEffect(() => {
     const t = localStorage.getItem("worknest_token")
     if (t) {
@@ -47,8 +43,6 @@ const Registration = () => {
     }
   }, [navigate])
 
-
-  // password strength check
   const getPasswordStrength = (pwd) => {
     if (!pwd) return { valid: false, score: 0, msg: "Enter a password" }
     let score = 0
@@ -63,26 +57,22 @@ const Registration = () => {
     }
   }
 
-  // form submit handler
   const handleSubmit = async (e) => {
     e.preventDefault()
     setErrorMessage("")
     setSuccessMessage("")
 
-    // check password match
     if (password !== confirmPassword) {
       setErrorMessage("Passwords do not match.")
       return
     }
 
-    // validate password strength
     const strength = getPasswordStrength(password)
     if (!strength.valid) {
       setErrorMessage(strength.msg)
       return
     }
 
-    // check terms agreement
     if (!agreeToTerms) {
       setErrorMessage("Please agree to the Terms of Service and Privacy Policy.")
       return
@@ -102,7 +92,6 @@ const Registration = () => {
         agree_to_terms: agreeToTerms,
       }
 
-      // call register api
       const response = await axios.post(`${API_BASE}/api/auth/register`, registrationData)
 
       const token = response.data.token
@@ -119,7 +108,6 @@ const Registration = () => {
 
     } catch (error) {
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
         console.error(error)
       }
       let errorText = "Registration failed. Please try again."
@@ -136,12 +124,8 @@ const Registration = () => {
     setIsLoading(false)
   }
 
-
-
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
-      
-      {/* left banner section */}
       <section className="hidden md:flex md:w-1/2 bg-blue-950 items-center justify-center">
         <div className="max-w-lg mx-12 p-8">
           <img src={logo} alt="logo" className="w-24" />
@@ -178,8 +162,6 @@ const Registration = () => {
         </div>
       </section>
 
-
-      {/* right form section */}
       <div className="flex items-center justify-center p-6 md:w-1/2 w-full">
         <div className="w-full max-w-md bg-white rounded-lg shadow-md p-8">
           <h2 className="text-3xl font-bold text-slate-900 mb-2">
@@ -190,22 +172,18 @@ const Registration = () => {
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            
-            {/* error msg */}
             {errorMessage != '' && (
               <div className="p-3 bg-red-100 text-red-700 rounded text-sm">
                 {errorMessage}
               </div>
             )}
 
-            {/* success msg */}
             {successMessage != '' && (
               <div className="p-3 bg-green-100 text-green-700 rounded text-sm">
                 {successMessage}
               </div>
             )}
 
-            {/* company name */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Company name
@@ -226,7 +204,6 @@ const Registration = () => {
               </div>
             </div>
 
-            {/* company size and industry in 2 cols */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -275,7 +252,6 @@ const Registration = () => {
               </div>
             </div>
 
-            {/* full name */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Full name
@@ -296,7 +272,6 @@ const Registration = () => {
               </div>
             </div>
 
-            {/* work email */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Work email
@@ -317,7 +292,6 @@ const Registration = () => {
               </div>
             </div>
 
-            {/* password + confirm */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -360,7 +334,6 @@ const Registration = () => {
               </div>
             </div>
 
-            {/* terms checkbox */}
             <label className="flex items-start gap-2 pt-2">
               <input
                 type="checkbox"
@@ -377,7 +350,6 @@ const Registration = () => {
               </span>
             </label>
 
-            {/* submit btn */}
             <button
               type="submit"
               disabled={isLoading}
@@ -388,7 +360,6 @@ const Registration = () => {
             </button>
           </form>
 
-          {/* login link */}
           <p className="text-center text-sm text-slate-500 mt-6">
             Already have an account?{' '}
             <Link

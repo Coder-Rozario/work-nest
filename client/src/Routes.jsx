@@ -12,7 +12,6 @@ import PageLayouts from "./layouts/pagelayouts"
 import AdminEmployeesAndRoles from "./pages/Admin/EmployeesAndRoles"
 import AdminTeams from "./pages/Admin/Teams"
 import AdminProjects from "./pages/Admin/Projects"
-import AdminTask from "./pages/Admin/Task"
 import AdminTimeAttendance from "./pages/Admin/TimeAttendance"
 import AdminReports from "./pages/Admin/Reports"
 import AdminProfile from "./pages/Admin/Profile"
@@ -113,7 +112,6 @@ function AppRoutes() {
         <Route path="/Admin/employees-and-roles" element={<ProtectedRoute allowedRole="admin"><AdminEmployeesAndRoles /></ProtectedRoute>} />
         <Route path="/Admin/teams" element={<ProtectedRoute allowedRole="admin"><AdminTeams /></ProtectedRoute>} />
         <Route path="/Admin/projects" element={<ProtectedRoute allowedRole="admin"><AdminProjects /></ProtectedRoute>} />
-        <Route path="/Admin/tasks" element={<ProtectedRoute allowedRole="admin"><AdminTask /></ProtectedRoute>} />
         <Route path="/Admin/time-attendance" element={<ProtectedRoute allowedRole="admin"><AdminTimeAttendance /></ProtectedRoute>} />
         <Route path="/Admin/meetings" element={<ProtectedRoute allowedRole="admin"><Meetings /></ProtectedRoute>} />
         <Route path="/Admin/messages" element={<ProtectedRoute allowedRole="admin"><Messages /></ProtectedRoute>} />

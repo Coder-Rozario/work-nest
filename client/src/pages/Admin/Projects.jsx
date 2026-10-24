@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Plus, Search } from "lucide-react";
 import { projectAPI, adminAPI } from "../../services/api";
+import useRealtime from "../../hooks/useRealtime";
 
 const AdminProjects = () => {
   const [projectList, setProjectList] = useState([])
@@ -19,6 +20,8 @@ const AdminProjects = () => {
     dueDate: "",
     priority: "Medium",
     projectType: "Internal",
+    status: "To Do",
+    progress: 0,
   });
 
   const mapProject = (p) => {
@@ -96,12 +99,28 @@ const AdminProjects = () => {
     loadData();
   }, [fetchProjects, fetchTeams]);
 
+  useRealtime(['projects', 'teams'], () => {
+    void Promise.all([fetchProjects(), fetchTeams()]);
+  });
+
   const filteredProjects = projectList.filter(
     (proj) => {
       return (proj.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       ((proj.team || "") + "").toLowerCase().includes(searchTerm.toLowerCase())
     }
   );
+
+  const emptyForm = () => ({
+    name: "",
+    description: "",
+    team: [],
+    startDate: "",
+    dueDate: "",
+    priority: "Medium",
+    projectType: "Internal",
+    status: "To Do",
+    progress: 0,
+  });
 
   const handleAddProject = async () => {
     if (!formData.name) return;
@@ -115,21 +134,14 @@ const AdminProjects = () => {
         due_date: formData.dueDate || undefined,
         priority: formData.priority || "Medium",
         project_type: formData.projectType || "Internal",
-        // status and progress are managed by managers; omit here so DB defaults apply
+        status: formData.status || "To Do",
+        progress: Number(formData.progress) || 0,
       };
 
       await projectAPI.createProject(payload);
       await fetchProjects();
 
-      setFormData({
-        name: "",
-        description: "",
-        team: [],
-        startDate: "",
-        dueDate: "",
-        priority: "Medium",
-        projectType: "Internal",
-      })
+      setFormData(emptyForm())
       setShowAddModal(false);
     } catch (err) {
       console.error("Error adding project:", err);
@@ -149,22 +161,15 @@ const AdminProjects = () => {
         due_date: formData.dueDate || undefined,
         priority: formData.priority || "Medium",
         project_type: formData.projectType || "Internal",
-        // Do not allow admin to change status/progress here; managers will handle that
+        status: formData.status || "To Do",
+        progress: Number(formData.progress) || 0,
       };
 
       await projectAPI.updateProject(selectedProject.id, payload);
       await fetchProjects();
       setShowEditModal(false);
       setSelectedProject(null);
-      setFormData({
-        name: "",
-        description: "",
-        team: [],
-        startDate: "",
-        dueDate: "",
-        priority: "Medium",
-        projectType: "Internal",
-      });
+      setFormData(emptyForm());
     } catch (err) {
       console.error("Error updating project:", err);
       alert(err.message || "Failed to update project");
@@ -230,6 +235,8 @@ const AdminProjects = () => {
       dueDate: toInputDate(project.dueDate || project.due_date),
       priority: project.priority || "Medium",
       projectType: project.project_type || "Internal",
+      status: project.status || "To Do",
+      progress: Number(project.progress) || 0,
     });
     setShowEditModal(true);
   };
@@ -353,7 +360,7 @@ const AdminProjects = () => {
 
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6">
+          <div className="w-full max-h-[90vh] max-w-md overflow-y-auto rounded-xl bg-white p-6">
             <h2 className="mb-4 text-xl font-semibold text-slate-900">
               Add Project
             </h2>
@@ -467,7 +474,32 @@ const AdminProjects = () => {
                 </div>
               </div>
 
-              {/* status and progress are managed by managers; removed from admin popup */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="To Do">To Do</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Completed">Completed</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Progress (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={formData.progress}
+                    onChange={(e) => setFormData({ ...formData, progress: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="mt-6 flex gap-3">
@@ -490,7 +522,7 @@ const AdminProjects = () => {
 
       {showEditModal && selectedProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6">
+          <div className="w-full max-h-[90vh] max-w-md overflow-y-auto rounded-xl bg-white p-6">
             <h2 className="mb-4 text-xl font-semibold text-slate-900">
               Edit Project
             </h2>
@@ -604,7 +636,32 @@ const AdminProjects = () => {
                 </div>
               </div>
 
-              {/* status and progress are managed by managers; removed from admin popup */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="To Do">To Do</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Completed">Completed</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Progress (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={formData.progress}
+                    onChange={(e) => setFormData({ ...formData, progress: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="mt-6 flex gap-3">

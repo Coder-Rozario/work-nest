@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Folder, Users, Calendar, ChevronRight } from "lucide-react"
 import { employeeAPI } from "../../services/api"
+import { useRealtime } from "../../hooks/useRealtime"
 
 const formatDate = (value) => {
 	if (!value) return "-"
@@ -16,7 +17,7 @@ const ProjectDetailModal = ({ project, onClose }) => {
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-			<div className="w-full max-w-md rounded-xl bg-white p-6 border border-slate-200 shadow-sm">
+			<div className="w-full max-h-[90vh] max-w-md overflow-y-auto rounded-xl bg-white p-6 border border-slate-200 shadow-sm">
 				<h2 className="text-xl font-semibold text-slate-900 mb-4">{project.name}</h2>
 				<div className="space-y-4 mb-4">
 					<div>
@@ -73,9 +74,9 @@ const EmployeeMyProjects = () => {
 	const [loading, setLoading] = useState(true)
 	const [selectedProject, setSelectedProject] = useState(null)
 
-	const loadProjects = async () => {
+	const loadProjects = async ({ silent = false } = {}) => {
 		try {
-			setLoading(true)
+			if (!silent) setLoading(true)
 			const data = await employeeAPI.getProjects()
 			setProjects(Array.isArray(data) ? data : [])
 		} catch {
@@ -92,6 +93,10 @@ const EmployeeMyProjects = () => {
 
 		return () => window.clearTimeout(timerId)
 	}, [])
+
+	useRealtime(["projects", "tasks"], () => {
+		void loadProjects({ silent: true })
+	})
 
 	if (loading) {
 		return <div className="min-h-screen bg-slate-50 p-6 text-center text-slate-500">Loading projects...</div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Folder, Users, Calendar, ChevronRight } from "lucide-react"
 import { projectAPI } from "../../services/api"
+import { useRealtime } from "../../hooks/useRealtime"
 
 const formatDate = (value) => {
 	if (!value) return "-"
@@ -10,16 +11,16 @@ const formatDate = (value) => {
 }
 
 const ProjectDetailModal = ({ project, onClose, onUpdated }) => {
-	if (!project) return null
-
-	const teamLabel = project.team_name || project.team || "-"
 	const [status, setStatus] = useState(project.status || "To Do")
 	const [progress, setProgress] = useState(Number(project.progress) || 0)
 	const [saving, setSaving] = useState(false)
 
 	useEffect(() => {
-		setStatus(project.status || "To Do")
-		setProgress(Number(project.progress) || 0)
+		const timer = setTimeout(() => {
+			setStatus(project.status || "To Do")
+			setProgress(Number(project.progress) || 0)
+		}, 0)
+		return () => clearTimeout(timer)
 	}, [project])
 
 	const handleSave = async () => {
@@ -38,7 +39,7 @@ const ProjectDetailModal = ({ project, onClose, onUpdated }) => {
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-			<div className="w-full max-w-md rounded-xl bg-white p-6 border border-slate-200 shadow-sm">
+			<div className="w-full max-h-[90vh] max-w-md overflow-y-auto rounded-xl bg-white p-6 border border-slate-200 shadow-sm">
 				<h2 className="text-xl font-semibold text-slate-900 mb-4">{project.name}</h2>
 				<div className="space-y-3 mb-4">
 					<div>
@@ -119,15 +120,15 @@ const ManagerProjects = () => {
 	const [loading, setLoading] = useState(true)
 	const [selectedProject, setSelectedProject] = useState(null)
 
-	const loadProjects = async () => {
+	const loadProjects = async ({ silent = false } = {}) => {
 		try {
-			setLoading(true)
+			if (!silent) setLoading(true)
 			const data = await projectAPI.getProjects()
 			setProjects(Array.isArray(data) ? data : [])
 		} catch {
 			setProjects([])
 		} finally {
-			setLoading(false)
+			if (!silent) setLoading(false)
 		}
 	}
 
@@ -138,6 +139,8 @@ const ManagerProjects = () => {
 
 		return () => window.clearTimeout(timerId)
 	}, [])
+
+	useRealtime(["projects", "teams"], () => { void loadProjects({ silent: true }) })
 
 	const getBadgeClass = (status) => {
 		if (status === "In Progress" || status === "Active") return "bg-blue-50 text-blue-700"
@@ -214,7 +217,7 @@ const ManagerProjects = () => {
 				)}
 			</div>
 
-			<ProjectDetailModal project={selectedProject} onClose={() => setSelectedProject(null)} onUpdated={loadProjects} />
+			{selectedProject && <ProjectDetailModal project={selectedProject} onClose={() => setSelectedProject(null)} onUpdated={loadProjects} />}
 		</div>
 	)
 }

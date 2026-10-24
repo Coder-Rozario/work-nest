@@ -67,7 +67,13 @@ export const managerAPI = {
   getTeamMembers: () => api.get('/manager/team-members'),
   getTeamTasks: () => api.get('/manager/tasks'),
   createTask: (data) => api.post('/manager/tasks', data),
-  updateTaskStatus: (id, status) => api.put(`/manager/tasks/${id}/status`, { status }),
+  updateTask: (id, data) => api.put(`/manager/tasks/${id}`, data),
+  deleteTask: (id) => api.delete(`/manager/tasks/${id}`),
+  updateTaskStatus: (id, status, reviewComment = '') => api.put(`/manager/tasks/${id}/status`, {
+      status,
+      review_comment: reviewComment,
+      manager_feedback: reviewComment,
+    }),
   getReports: () => api.get('/manager/reports'),
   getTimeLog: () => api.get('/manager/time-log'),
 };

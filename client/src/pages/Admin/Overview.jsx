@@ -1,7 +1,8 @@
-import { Users, CheckSquare, Building2, Clock, Plus, ChevronRight, BriefcaseBusiness, BarChart3, UserCheck, MessageSquareText, CalendarClock, Play, Pause, FolderKanban } from "lucide-react";
+import { Users, CheckSquare, Building2, Clock, Plus, ChevronRight, BriefcaseBusiness, BarChart3, UserCheck, FolderKanban } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { adminAPI, messageAPI, meetingAPI, timeAttendanceAPI } from "../../services/api";
+import useRealtime from "../../hooks/useRealtime";
 
 const statusStyles = {
   "In Progress": "bg-blue-50 text-blue-700",
@@ -13,10 +14,28 @@ const statusStyles = {
 
 const getStatusClass = (status) => statusStyles[status] || "bg-slate-100 text-slate-700";
 
-const getPresenceClass = (status) => {
-  if (status === "online") return "bg-green-500";
-  if (status === "away") return "bg-amber-400";
-  return "bg-slate-300";
+const xorDecrypt = (input) => {
+  const text = String(input ?? "");
+  if (!text.trim()) return "";
+  if (text.length % 2 !== 0) return text;
+
+  let result = "";
+  const ENCRYPTION_KEY = "worknest_secure_v1";
+  for (let i = 0; i < text.length; i += 2) {
+    const hexPair = text.slice(i, i + 2);
+    if (!/^[0-9a-fA-F]{2}$/.test(hexPair)) return text;
+    const byte = parseInt(hexPair, 16);
+    const keyCode = ENCRYPTION_KEY.charCodeAt((i / 2) % ENCRYPTION_KEY.length);
+    result += String.fromCharCode(byte ^ keyCode);
+  }
+  return result;
+};
+
+const decodeMessageText = (value) => {
+  const text = String(value ?? "");
+  const decoded = xorDecrypt(text);
+  if (decoded && decoded.trim()) return decoded.trim();
+  return text && text.trim() ? text.trim() : "No messages yet";
 };
 
 const formatDurationFriendly = (totalMinutes) => {
@@ -26,6 +45,28 @@ const formatDurationFriendly = (totalMinutes) => {
   const hours = minutes / 60;
   if (Number.isInteger(hours)) return `${hours} hr${hours === 1 ? "" : "s"}`;
   return `${hours.toFixed(1).replace(/\.0$/, "")} hrs`;
+};
+
+const formatDisplayDate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const formatDisplayTime = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
 };
 
 const getAttendanceStatus = (checkIn, officeStart = "09:00") => {
@@ -40,7 +81,7 @@ const getAttendanceStatus = (checkIn, officeStart = "09:00") => {
       return "Present";
     }
   } catch {
-    // ignore invalid check-in data
+    return "Present";
   }
   return "Present";
 };
@@ -55,9 +96,7 @@ const AdminOverview = () => {
   const [upcomingMeetings, setUpcomingMeetings] = useState([]);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [clocking, setClocking] = useState(false);
-  const [isClocked, setIsClocked] = useState(false);
-  const [activeLogId, setActiveLogId] = useState(null);
+  const [tick, setTick] = useState(0);
 
   const mapTask = (t) => ({
     ...t,
@@ -70,7 +109,6 @@ const AdminOverview = () => {
     name: m.full_name || m.name || "Unknown",
     team: m.team_name || m.team || "-",
     position: m.position || "-",
-    status: m.status || "offline",
   });
 
   const mapMessage = (msg) => ({
@@ -83,76 +121,71 @@ const AdminOverview = () => {
   const mapMeeting = (mtg) => ({
     ...mtg,
     title: mtg.title || mtg.meeting_title || "Untitled Meeting",
-    scheduledTime: [mtg.meeting_date, mtg.meeting_time].filter(Boolean).join(" ") || mtg.scheduledTime || "-",
+    meetingDate: mtg.meeting_date || mtg.date || mtg.scheduledTime || "",
+    meetingTime: mtg.meeting_time || mtg.time || "",
   });
 
-  const loadOverview = async () => {
-    try {
-      setLoading(true);
-      const [dashData, tasksData, employeesData, projectsData, messagesData, meetingsData, attendanceResp] = await Promise.all([
-        adminAPI.getDashboard(),
-        adminAPI.getTasks(),
-        adminAPI.getEmployees(),
-        adminAPI.getProjects(),
-        messageAPI.getConversations().catch(() => []),
-        meetingAPI.getMeetings().catch(() => []),
-        timeAttendanceAPI.getRecords().catch(() => [])
-      ]);
-
-      const records = (attendanceResp && Array.isArray(attendanceResp.records)) ? attendanceResp.records : (Array.isArray(attendanceResp) ? attendanceResp : []);
-      const active = records.find((entry) => entry.check_in && !entry.check_out);
-      setIsClocked(Boolean(active));
-      setActiveLogId(active ? active.id : null);
-
-      setDashboard(dashData || {});
-      setTasks((Array.isArray(tasksData) ? tasksData.map(mapTask) : []).slice(0, 4));
-      setProjects((Array.isArray(projectsData) ? projectsData : []).slice(0, 4));
-      setTeamMembers((Array.isArray(employeesData) ? employeesData.map(mapMember) : []).slice(0, 4));
-      setRecentMessages((Array.isArray(messagesData) ? messagesData.map(mapMessage) : []).slice(0, 2));
-      setUpcomingMeetings((Array.isArray(meetingsData) ? meetingsData.map(mapMeeting) : []).slice(0, 2));
-      setAttendanceRecords(records.slice(0, 5));
-    } catch (err) {
-      console.error("Error fetching admin overview:", err);
-      setDashboard({ total_employees: 0, total_tasks: 0, total_projects: 0, total_meetings: 0 });
-      setTasks([]);
-      setProjects([]);
-      setTeamMembers([]);
-      setRecentMessages([]);
-      setUpcomingMeetings([]);
-      setAttendanceRecords([]);
-      setIsClocked(false);
-      setActiveLogId(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const fetchOverviewRef = useRef(null);
 
   useEffect(() => {
-    void loadOverview();
+    let isMounted = true;
+
+    const fetchOverview = async ({ silent = false } = {}) => {
+      try {
+        if (!silent) setLoading(true);
+        const [dashData, tasksData, employeesData, projectsData, messagesData, meetingsData, attendanceResp] = await Promise.all([
+          adminAPI.getDashboard(),
+          adminAPI.getTasks(),
+          adminAPI.getEmployees(),
+          adminAPI.getProjects(),
+          messageAPI.getConversations().catch(() => []),
+          meetingAPI.getMeetings().catch(() => []),
+          timeAttendanceAPI.getRecords().catch(() => [])
+        ]);
+
+        const records = (attendanceResp && Array.isArray(attendanceResp.records)) ? attendanceResp.records : (Array.isArray(attendanceResp) ? attendanceResp : []);
+
+        if (!isMounted) return;
+
+        setDashboard(dashData || {});
+        setTasks((Array.isArray(tasksData) ? tasksData.map(mapTask) : []).slice(0, 4));
+        setProjects((Array.isArray(projectsData) ? projectsData : []).slice(0, 4));
+        setTeamMembers((Array.isArray(employeesData) ? employeesData.map(mapMember) : []).slice(0, 4));
+        setRecentMessages((Array.isArray(messagesData) ? messagesData.map(mapMessage) : []).slice(0, 2));
+        setUpcomingMeetings((Array.isArray(meetingsData) ? meetingsData.map(mapMeeting) : []).slice(0, 2));
+        setAttendanceRecords(records.slice(0, 5));
+      } catch (err) {
+        console.error("Error fetching admin overview:", err);
+        if (!isMounted) return;
+        setDashboard({ total_employees: 0, total_tasks: 0, total_projects: 0, total_meetings: 0 });
+        setTasks([]);
+        setProjects([]);
+        setTeamMembers([]);
+        setRecentMessages([]);
+        setUpcomingMeetings([]);
+        setAttendanceRecords([]);
+      } finally {
+        if (isMounted && !silent) setLoading(false);
+      }
+    };
+
+    fetchOverviewRef.current = fetchOverview;
+    void fetchOverview();
+
+    const intervalId = window.setInterval(() => {
+      setTick((t) => t + 1)
+    }, 60000)
+
+    return () => {
+      isMounted = false;
+      fetchOverviewRef.current = null;
+      window.clearInterval(intervalId)
+    };
   }, []);
 
-  const handleClockToggle = async () => {
-    try {
-      setClocking(true);
-      if (!isClocked) {
-        const res = await timeAttendanceAPI.addRecord({ check_in: new Date().toISOString(), check_out: null, note: "Clock in" });
-        if (res && res.id) setActiveLogId(res.id);
-        setIsClocked(true);
-      } else {
-        const sessionId = activeLogId || attendanceRecords.find((log) => log.check_in && !log.check_out)?.id;
-        if (sessionId) {
-          await timeAttendanceAPI.updateRecord(sessionId, { check_out: new Date().toISOString(), note: "Clock out" });
-        }
-        setIsClocked(false);
-        setActiveLogId(null);
-      }
-      await loadOverview();
-    } catch {
-      window.alert("Could not update clock status. Please try again.");
-    } finally {
-      setClocking(false);
-    }
-  };
+  useRealtime(['tasks', 'projects', 'meetings', 'employees', 'attendance'], () => {
+    if (fetchOverviewRef.current) void fetchOverviewRef.current({ silent: true });
+  });
 
   const stats = useMemo(() => [
     { label: "Total Employees", value: dashboard?.total_employees ?? "0", icon: Users },
@@ -165,11 +198,16 @@ const AdminOverview = () => {
     const presentCount = attendanceRecords.filter((record) => getAttendanceStatus(record.check_in, "09:00") !== "Absent").length;
     const lateCount = attendanceRecords.filter((record) => getAttendanceStatus(record.check_in, "09:00") === "Late").length;
     const totalMinutes = attendanceRecords.reduce((sum, record) => {
-      const diff = record.check_in && record.check_out ? (new Date(record.check_out).getTime() - new Date(record.check_in).getTime()) / 60000 : 0;
+      let diff = 0
+      if (record.check_in && record.check_out) {
+        diff = (new Date(record.check_out).getTime() - new Date(record.check_in).getTime()) / 60000
+      } else if (record.check_in && !record.check_out) {
+        diff = (Date.now() - new Date(record.check_in).getTime()) / 60000
+      }
       return sum + Math.max(0, diff);
     }, 0);
     return { presentCount, lateCount, totalMinutes };
-  }, [attendanceRecords]);
+  }, [attendanceRecords, tick]);
 
   if (loading) {
     return <div className="p-6 text-center">Loading dashboard...</div>;
@@ -194,11 +232,7 @@ const AdminOverview = () => {
             </button>
             <button onClick={() => navigate("/Admin/time-attendance")} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
               <UserCheck className="h-4 w-4" />
-              Attendance
-            </button>
-            <button onClick={handleClockToggle} disabled={clocking} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${isClocked ? "bg-red-100 text-red-700 hover:bg-red-200" : "bg-green-100 text-green-700 hover:bg-green-200"}`}>
-              {isClocked ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              {isClocked ? "Clock Out" : "Clock In"}
+              Time Attendance
             </button>
           </div>
         </div>
@@ -219,6 +253,59 @@ const AdminOverview = () => {
         })}
       </div>
 
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-5 py-4">
+            <h2 className="text-sm font-semibold text-slate-900">Recent messages</h2>
+            <p className="mt-1 text-xs text-slate-500">Latest team conversations</p>
+          </div>
+
+          <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
+            {recentMessages.length > 0 ? (
+              recentMessages.map((msg) => (
+                <li key={msg.id || msg.createdAt} className="px-5 py-3.5 cursor-pointer hover:bg-slate-50" onClick={() => navigate("/Admin/messages")}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-sm font-medium text-slate-900">{msg.sender}</p>
+                    <span className="text-[11px] text-slate-400">{formatDisplayDate(msg.createdAt)}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600 wrap-break-word">{decodeMessageText(msg.content)}</p>
+                </li>
+              ))
+            ) : (
+              <li className="px-5 py-3.5 text-sm text-slate-500">No recent messages</li>
+            )}
+          </ul>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-5 py-4">
+            <h2 className="text-sm font-semibold text-slate-900">Upcoming meetings</h2>
+            <p className="mt-1 text-xs text-slate-500">Scheduled collaboration</p>
+          </div>
+
+          <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
+            {upcomingMeetings.length > 0 ? (
+              upcomingMeetings.map((meeting) => {
+                const scheduled = [formatDisplayDate(meeting.meetingDate), formatDisplayTime(meeting.meetingTime)].filter(Boolean).join(" · ") || "Scheduled";
+                return (
+                  <li key={meeting.id || meeting.title} className="px-5 py-3.5 cursor-pointer hover:bg-slate-50" onClick={() => navigate("/Admin/meetings")}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-slate-900">{meeting.title}</p>
+                        <p className="text-xs text-slate-500">{scheduled}</p>
+                      </div>
+                      <button className="text-xs font-medium text-blue-700 hover:text-blue-800" onClick={() => navigate("/Admin/meetings")}>View</button>
+                    </div>
+                  </li>
+                );
+              })
+            ) : (
+              <li className="px-5 py-3.5 text-sm text-slate-500">No upcoming meetings</li>
+            )}
+          </ul>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
@@ -232,17 +319,27 @@ const AdminOverview = () => {
             </button>
           </div>
 
-          <ul className="divide-y divide-slate-100">
+          <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
             {tasks.length > 0 ? (
               tasks.map((task) => (
-                <li key={task.id || task.title} className="flex cursor-pointer items-center justify-between px-5 py-3.5 transition hover:bg-slate-50" onClick={() => navigate("/Admin/tasks")}>
-                  <div className="min-w-0">
+                <li key={task.id || task.title} className="flex cursor-pointer items-center justify-between gap-4 px-5 py-3.5 transition hover:bg-slate-50" onClick={() => navigate("/Admin/tasks")}>
+                  <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-slate-900">{task.title}</p>
-                    <p className="text-xs text-slate-500">{task.assignee} · Due {task.dueDate}</p>
+                    <p className="text-xs text-slate-500">{task.assignee} · Due {formatDisplayDate(task.dueDate) || "N/A"}</p>
+                    {task.progress_note ? (
+                      <p className="mt-1 text-[11px] text-slate-600">
+                        <span className="font-medium text-slate-700">Progress note:</span> {task.progress_note}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-slate-400">No progress note yet</p>
+                    )}
                   </div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${getStatusClass(task.status)}`}>
-                    {task.status}
-                  </span>
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${getStatusClass(task.status)}`}>
+                      {task.status}
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-500">{Number(task.progress || 0)}%</span>
+                  </div>
                 </li>
               ))
             ) : (
@@ -282,7 +379,7 @@ const AdminOverview = () => {
             <h2 className="text-sm font-semibold text-slate-900">Project progress</h2>
             <p className="mt-1 text-xs text-slate-500">Company-wide delivery status</p>
           </div>
-          <div className="space-y-4 p-5">
+          <div className="max-h-72 space-y-4 overflow-y-auto p-5">
             {projects.length > 0 ? (
               projects.map((project) => (
                 <div key={project.id || project.name}>
@@ -291,7 +388,7 @@ const AdminOverview = () => {
                     <span className="text-xs font-medium text-slate-500">{Number(project.progress || 0)}%</span>
                   </div>
                   <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-green-500" style={{ width: `${Math.min(100, Math.max(0, Number(project.progress || 0)))}%` }} />
+                    <div className="h-full rounded-full bg-linear-to-r from-blue-500 to-green-500" style={{ width: `${Math.min(100, Math.max(0, Number(project.progress || 0)))}%` }} />
                   </div>
                 </div>
               ))
@@ -305,16 +402,15 @@ const AdminOverview = () => {
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Team members</h2>
-              <p className="mt-1 text-xs text-slate-500">Company presence snapshot</p>
+              <p className="mt-1 text-xs text-slate-500">Company member list</p>
             </div>
             <button className="flex items-center gap-1 text-sm font-medium text-blue-700 hover:text-blue-800" onClick={() => navigate("/Admin/employees")}>View all <ChevronRight className="h-3.5 w-3.5" /></button>
           </div>
-          <ul className="divide-y divide-slate-100">
+          <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
             {teamMembers.length > 0 ? (
               teamMembers.map((member) => (
                 <li key={member.id || member.name} className="flex items-center justify-between px-5 py-3.5 transition hover:bg-slate-50">
                   <div className="flex min-w-0 items-center gap-3">
-                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${getPresenceClass(member.status || "offline")}`} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-slate-900">{member.name}</p>
                       <p className="text-xs text-slate-500">{member.position}</p>
@@ -325,58 +421,6 @@ const AdminOverview = () => {
               ))
             ) : (
               <li className="px-5 py-3.5 text-sm text-slate-500">No team members</li>
-            )}
-          </ul>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-sm font-semibold text-slate-900">Recent messages</h2>
-            <p className="mt-1 text-xs text-slate-500">Latest team conversations</p>
-          </div>
-
-          <ul className="divide-y divide-slate-100">
-            {recentMessages.length > 0 ? (
-              recentMessages.map((message, idx) => (
-                <li key={message.id || idx} className="cursor-pointer px-5 py-3.5 transition hover:bg-slate-50" onClick={() => navigate("/Admin/messages")}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900">{message.sender}</p>
-                      <p className="text-xs text-slate-500">{message.content}</p>
-                    </div>
-                    <span className="shrink-0 text-[11px] text-slate-500">{message.createdAt}</span>
-                  </div>
-                </li>
-              ))
-            ) : (
-              <li className="px-5 py-3.5 text-sm text-slate-500">No messages</li>
-            )}
-          </ul>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-sm font-semibold text-slate-900">Upcoming meetings</h2>
-            <p className="mt-1 text-xs text-slate-500">Team planning and check-ins</p>
-          </div>
-
-          <ul className="divide-y divide-slate-100">
-            {upcomingMeetings.length > 0 ? (
-              upcomingMeetings.map((meeting, idx) => (
-                <li key={meeting.id || idx} className="cursor-pointer px-5 py-3.5 transition hover:bg-slate-50" onClick={() => navigate("/Admin/meetings")}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900">{meeting.title}</p>
-                      <p className="text-xs text-slate-500">{meeting.scheduledTime}</p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
-                  </div>
-                </li>
-              ))
-            ) : (
-              <li className="px-5 py-3.5 text-sm text-slate-500">No upcoming meetings</li>
             )}
           </ul>
         </div>

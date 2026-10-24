@@ -1,13 +1,11 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Search } from "lucide-react";
 import { timeAttendanceAPI, adminAPI } from "../../services/api";
 import { getAssetUrl } from "../../config/env";
+import useRealtime from "../../hooks/useRealtime";
 
 const pad2 = (n) => String(n).padStart(2, "0");
 
-// Parse any date value (ISO string, Date, or "YYYY-MM-DD HH:MM:SS") into a local
-// YYYY-MM-DD string using the browser's timezone so admin sees the same local
-// date as employees/managers.
 const extractDate = (s) => {
   if (!s) return "";
   const d = s instanceof Date ? s : new Date(s);
@@ -20,8 +18,6 @@ const extractDate = (s) => {
   return str.length >= 10 ? str.slice(0, 10) : str;
 };
 
-// Parse any date value into a local "HH:MM" string using the browser's timezone
-// instead of slicing the raw (UTC) ISO time.
 const extractTime = (s) => {
   if (!s) return "-";
   const d = s instanceof Date ? s : new Date(s);
@@ -39,7 +35,6 @@ const extractTime = (s) => {
   }
 };
 
-// Convert a "HH:MM" (24-hour) string to 12-hour format with AM/PM.
 const format12Hour = (timeStr) => {
   if (!timeStr || timeStr === "-") return "-";
   const match = String(timeStr).match(/^(\d{1,2}):(\d{2})/);
@@ -53,15 +48,21 @@ const format12Hour = (timeStr) => {
   return `${h}:${m} ${period}`;
 };
 
-// Calculate worked hours from the full timestamps so overnight shifts and
-// timezone offsets are handled correctly.
 const calcHours = (checkIn, checkOut) => {
-  if (!checkIn || !checkOut || checkIn === "-" || checkOut === "-") return "-";
+  if (!checkIn || checkIn === "-") return "-";
   const inDate = new Date(checkIn);
-  const outDate = new Date(checkOut);
-  if (Number.isNaN(inDate.getTime()) || Number.isNaN(outDate.getTime())) return "-";
+  if (Number.isNaN(inDate.getTime())) return "-";
+  
+  let outDate;
+  if (!checkOut || checkOut === "-") {
+    outDate = new Date();
+  } else {
+    outDate = new Date(checkOut);
+  }
+  
+  if (Number.isNaN(outDate.getTime())) return "-";
   const diffMs = outDate.getTime() - inDate.getTime();
-  if (diffMs <= 0) return "-";
+  if (diffMs <= 0) return "0.00";
   return (diffMs / 3600000).toFixed(2);
 };
 
@@ -74,7 +75,6 @@ const determineStatus = (checkIn, officeStart) => {
     const minutes = h * 60 + m;
     const [sh, sm] = String(officeStart || "09:00").split(":").map((n) => parseInt(n, 10) || 0);
     const startMinutes = sh * 60 + sm;
-    // 15 minute grace period before marking as late
     if (minutes > startMinutes + 15) return "Late";
     return "Present";
   } catch {
@@ -122,21 +122,20 @@ const formatDurationFriendly = (totalMinutes) => {
 const AdminTimeAttendance = () => {
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedDate, setSelectedDate] = useState("");
-  const [attendance, setAttendance] = useState([]);
+  const [rawAttendance, setRawAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [officeStart, setOfficeStart] = useState("09:00")
   const [officeEnd, setOfficeEnd] = useState("17:00")
   const [savingSettings, setSavingSettings] = useState(false)
+  const [tick, setTick] = useState(0)
   const [error, setError] = useState(null);
 
   const fetchAttendance = useCallback(async () => {
     try {
-      // fetch settings + records in parallel to minimize requests/token usage
       const [settingsResp, attendanceResp] = await Promise.all([adminAPI.getSettings().catch(() => null), timeAttendanceAPI.getRecords()])
 
       const records = (attendanceResp && Array.isArray(attendanceResp.records)) ? attendanceResp.records : (Array.isArray(attendanceResp) ? attendanceResp : [])
 
-      // extract office start/end from settings if available, fall back to attendance response
       let resolvedOfficeStart = "09:00"
       let resolvedOfficeEnd = "17:00"
       if (settingsResp && typeof settingsResp === 'object') {
@@ -151,12 +150,16 @@ const AdminTimeAttendance = () => {
       setOfficeStart(resolvedOfficeStart)
       setOfficeEnd(resolvedOfficeEnd)
 
-      setAttendance((records || []).map((r) => mapRecord(r, resolvedOfficeStart)))
+      setRawAttendance(records || [])
     } catch (err) {
       console.error("Error fetching attendance:", err);
       setError(err.message || "Failed to load attendance records");
     }
   }, []);
+
+  const attendance = useMemo(() => {
+    return rawAttendance.map((r) => mapRecord(r, officeStart))
+  }, [rawAttendance, officeStart, tick])
 
   useEffect(() => {
     const load = async () => {
@@ -169,6 +172,17 @@ const AdminTimeAttendance = () => {
     };
     load();
   }, [fetchAttendance]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setTick((t) => t + 1)
+    }, 60000)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  useRealtime(['attendance', 'employees'], () => {
+    void fetchAttendance();
+  });
 
   const handleSaveSettings = async () => {
     try {

@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { getOfficeHours, getProfilePhotoUrl } = require('./timeAttendanceController');
+const { getCompanyUploadUrl } = require('../utils/upload');
 
 const getEmployeeDashboard = async (req, res) => {
   try {
@@ -72,20 +73,19 @@ const submitTask = async (req, res) => {
     const userId = Number(req.user.id);
     const companyId = Number(req.user.company_id);
 
-    // handle uploaded files (if any) and build relative URLs
     let fileMeta = [];
     if (Array.isArray(req.files) && req.files.length) {
       fileMeta = req.files.map((f) => ({
         name: String(f.originalname || 'upload-file'),
-        url: `/uploads/companies/${companyId}/${f.filename}`,
+        url: getCompanyUploadUrl(req.user, f.filename), // path
       }));
     }
 
-    const filesJson = fileMeta.length ? JSON.stringify(fileMeta) : '';
+    const filesJson = fileMeta.length ? JSON.stringify(fileMeta) : ''; // save
 
     await db.query(
       `UPDATE tasks
-       SET submission_description = ?, submission_url = ?, submission_files = ?, status = 'Submitted', submitted_at = NOW()
+       SET submission_description = ?, submission_url = ?, submission_files = ?, progress = 100, status = 'Submitted', submitted_at = NOW()
        WHERE id = ? AND assignee_id = ? AND company_id = ?`,
       [work_description || '', work_url || '', filesJson, taskId, userId, companyId]
     );
@@ -118,7 +118,8 @@ const getEmployeeTeamMembers = async (req, res) => {
     }
 
     const [rows] = await db.query(
-      `SELECT u.id, u.full_name, u.email, u.role, u.position, u.team_id, t.name AS team_name
+      `SELECT u.id, u.full_name, u.email, u.role, u.position, u.team_id, t.name AS team_name,
+              COALESCE((SELECT COUNT(*) FROM tasks t2 WHERE t2.company_id = u.company_id AND t2.assignee_id = u.id), 0) AS task_count
        FROM users u
        LEFT JOIN teams t ON t.id = u.team_id
        WHERE u.company_id = ?

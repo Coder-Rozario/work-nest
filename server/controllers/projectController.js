@@ -42,6 +42,16 @@ const getUserScopedTeamNames = async (user) => {
   return (teamRows || []).map((team) => String(team.name || '').trim()).filter(Boolean);
 };
 
+const normalizeTeamNames = (value) => {
+  const rawList = Array.isArray(value) ? value : String(value || '').split(',');
+  const names = rawList.map((name) => String(name || '').trim()).filter(Boolean);
+  return [...new Set(names)];
+};
+
+// A project can be assigned to multiple teams, so team_name holds a comma-separated list
+const buildTeamScope = (values) =>
+  values.map((value) => `FIND_IN_SET(${value}, REPLACE(p.team_name, ', ', ','))`).join(' OR ');
+
 const getProjects = async (req, res) => {
   try {
     const companyId = Number(req.user.company_id);
@@ -60,8 +70,8 @@ const getProjects = async (req, res) => {
       }
 
       const [rows] = await db.query(
-        `${baseQuery} AND p.team_name IN (?) ORDER BY p.id DESC`,
-        [companyId, scopedTeamNames]
+        `${baseQuery} AND (${buildTeamScope(scopedTeamNames.map(() => '?'))}) ORDER BY p.id DESC`,
+        [companyId, ...scopedTeamNames]
       );
 
       return res.status(200).json({ success: true, data: rows });
@@ -106,7 +116,7 @@ const createProject = async (req, res) => {
         req.user.company_id,
         name,
         description || '',
-        team_name || null,
+        normalizeTeamNames(team_name).join(', ') || null,
         start_date || null,
         due_date || null,
         Number(progress) || 0,
@@ -147,7 +157,7 @@ const updateProject = async (req, res) => {
 
     const updatedName = typeof name === 'undefined' ? existing.name : name;
     const updatedDescription = typeof description === 'undefined' ? existing.description : description;
-    const updatedTeamName = typeof team_name === 'undefined' ? existing.team_name : team_name;
+    const updatedTeamName = typeof team_name === 'undefined' ? existing.team_name : normalizeTeamNames(team_name).join(', ') || null;
     const updatedStartDate = typeof start_date === 'undefined' ? existing.start_date : start_date;
     const updatedDueDate = typeof due_date === 'undefined' ? existing.due_date : due_date;
     const updatedProgress = typeof progress === 'undefined' ? existing.progress : Number(progress) || 0;
@@ -202,7 +212,12 @@ const deleteProject = async (req, res) => {
 const getTeams = async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT t.*, u.full_name, COUNT(u2.id) AS member_count
+      `SELECT t.*, u.full_name, COUNT(u2.id) AS member_count,
+              (SELECT COUNT(*) FROM projects p
+                WHERE p.company_id = t.company_id
+                  AND COALESCE(p.status, '') <> 'Completed'
+                  AND ${buildTeamScope(['t.name'])}
+              ) AS activeProjects
        FROM teams t
        LEFT JOIN users u ON u.id = t.leader_id
        LEFT JOIN users u2 ON u2.team_id = t.id AND u2.company_id = ?
@@ -216,6 +231,7 @@ const getTeams = async (req, res) => {
       ...team,
       leader: team.leader_id ? team.full_name || '' : '',
       member_count: Number(team.member_count || 0),
+      activeProjects: Number(team.activeProjects || 0),
     }));
 
     res.status(200).json({ success: true, data: normalizedRows });

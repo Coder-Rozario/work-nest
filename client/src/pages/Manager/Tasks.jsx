@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react"
 import { CheckSquare, User, Calendar, Plus, Search, FileText, X } from "lucide-react"
 import { managerAPI, projectAPI } from "../../services/api"
 import { getAssetUrl } from "../../config/env"
+import { useRealtime } from "../../hooks/useRealtime"
 
 const statusColors = {
 	Assigned: "bg-slate-100 text-slate-700",
@@ -26,10 +27,8 @@ function formatDate(value) {
 	if (value instanceof Date) {
 		date = value
 	} else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-		// plain date string like 2026-10-14
 		date = new Date(value + 'T00:00:00')
 	} else {
-		// try parsing ISO or other date strings
 		date = new Date(value)
 	}
 
@@ -37,11 +36,9 @@ function formatDate(value) {
 	return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 }
 
-const formatFileSize = (bytes) => {
-	if (!bytes) return "0 KB"
-	if (bytes < 1024) return `${bytes} B`
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+const getProgressNotePreview = (value) => {
+	if (!value || !String(value).trim()) return ""
+	return String(value).replace(/\s+/g, ' ').trim()
 }
 
 function getEmptyForm() {
@@ -67,11 +64,12 @@ const ManagerTasks = () => {
 	const [selectedTask, setSelectedTask] = useState(null)
 	const [reviewComment, setReviewComment] = useState("")
 	const [formData, setFormData] = useState(getEmptyForm)
-	const [reviewData, setReviewData] = useState(null)
+	const [editingTaskId, setEditingTaskId] = useState(null)
+	const [isDeletingTask, setIsDeletingTask] = useState(false)
 
-	const loadData = async () => {
+	const loadData = async ({ silent = false } = {}) => {
 		try {
-			setLoading(true)
+			if (!silent) setLoading(true)
 			const [tasks, members, projectsData] = await Promise.all([
 				managerAPI.getTeamTasks(),
 				managerAPI.getTeam(),
@@ -85,7 +83,7 @@ const ManagerTasks = () => {
 			setTeamMembers([])
 			setProjects([])
 		} finally {
-			setLoading(false)
+			if (!silent) setLoading(false)
 		}
 	}
 
@@ -96,6 +94,8 @@ const ManagerTasks = () => {
 
 		return () => window.clearTimeout(timerId)
 	}, [])
+
+	useRealtime(["tasks", "projects", "employees"], () => { void loadData({ silent: true }) })
 
 	const updateForm = (updates) => {
 		setFormData((current) => ({ ...current, ...updates }))
@@ -127,31 +127,10 @@ const ManagerTasks = () => {
 		return result
 	}, [taskList, filterStatus, searchTerm])
 
-	const handleAddTask = async () => {
-		if (!formData.title || !formData.assignee_id) return
-		try {
-			await managerAPI.createTask({
-				title: formData.title,
-				description: formData.description,
-				project_name: formData.project_name,
-				assignee_id: Number(formData.assignee_id),
-				priority: formData.priority,
-				due_date: formData.due_date,
-				status: "Assigned",
-			})
-			setFormData(getEmptyForm())
-			setShowAddTaskModal(false)
-			await loadData()
-		} catch {
-			window.alert("Could not create task. Please try again.")
-		}
-	}
-
 	const openReviewModal = (task) => {
 		if (!task) return
 		setSelectedTask({ ...task })
 		setReviewComment(task.review_comment || "")
-		setReviewData(task)
 		setShowReviewModal(true)
 	}
 
@@ -160,13 +139,14 @@ const ManagerTasks = () => {
 		const confirmed = window.confirm("Are you sure you want to approve this work submission?")
 		if (!confirmed) return
 		try {
-			await managerAPI.updateTaskStatus(selectedTask.id, "Approved")
+			await managerAPI.updateTaskStatus(selectedTask.id, "Approved", reviewComment)
 			setShowReviewModal(false)
 			setSelectedTask(null)
 			setReviewComment("")
 			await loadData()
-		} catch {
-			window.alert("Could not approve task. Please try again.")
+		} catch (error) {
+			console.error('Approve task failed:', error)
+			window.alert(error?.message || "Could not approve task. Please try again.")
 		}
 	}
 
@@ -177,13 +157,14 @@ const ManagerTasks = () => {
 			return
 		}
 		try {
-			await managerAPI.updateTaskStatus(selectedTask.id, "Revision Required")
+			await managerAPI.updateTaskStatus(selectedTask.id, "Revision Required", reviewComment)
 			setShowReviewModal(false)
 			setSelectedTask(null)
 			setReviewComment("")
 			await loadData()
-		} catch {
-			window.alert("Could not request revision. Please try again.")
+		} catch (error) {
+			console.error('Request revision failed:', error)
+			window.alert(error?.message || "Could not request revision. Please try again.")
 		}
 	}
 
@@ -194,6 +175,72 @@ const ManagerTasks = () => {
 		{ label: "Approved", value: taskList.filter((t) => t.status === "Approved").length },
 		{ label: "Revision Required", value: taskList.filter((t) => t.status === "Revision Required").length },
 	], [taskList])
+
+	const handleDeleteTask = async (taskId) => {
+		if (!taskId) return
+		const confirmed = window.confirm("Are you sure you want to delete this task?")
+		if (!confirmed) return
+
+		try {
+			setIsDeletingTask(true)
+			await managerAPI.deleteTask(taskId)
+			setShowAddTaskModal(false)
+			setEditingTaskId(null)
+			setFormData(getEmptyForm())
+			await loadData()
+		} catch {
+			window.alert("Could not delete task. Please try again.")
+		} finally {
+			setIsDeletingTask(false)
+		}
+	}
+
+	const handleSaveTask = async () => {
+		if (!formData.title || (!formData.assignee_id && formData.assignee_id !== "")) return
+		try {
+			if (editingTaskId) {
+				await managerAPI.updateTask(editingTaskId, {
+					title: formData.title,
+					description: formData.description,
+					project_name: formData.project_name,
+					assignee_id: formData.assignee_id === "" ? null : Number(formData.assignee_id),
+					priority: formData.priority,
+					due_date: formData.due_date,
+					status: "Assigned",
+				})
+			} else {
+				await managerAPI.createTask({
+					title: formData.title,
+					description: formData.description,
+					project_name: formData.project_name,
+					assignee_id: Number(formData.assignee_id),
+					priority: formData.priority,
+					due_date: formData.due_date,
+					status: "Assigned",
+				})
+			}
+			setFormData(getEmptyForm())
+			setEditingTaskId(null)
+			setShowAddTaskModal(false)
+			await loadData()
+		} catch {
+			window.alert(editingTaskId ? "Could not update task. Please try again." : "Could not create task. Please try again.")
+		}
+	}
+
+	const openEditTask = (task) => {
+		if (!task) return
+		setEditingTaskId(task.id)
+		setFormData({
+			title: task.title || "",
+			description: task.description || "",
+			project_name: task.project_name || "",
+			assignee_id: task.assignee_id ? String(task.assignee_id) : "",
+			priority: task.priority || "Medium",
+			due_date: task.due_date ? String(task.due_date).slice(0, 10) : "",
+		})
+		setShowAddTaskModal(true)
+	}
 
 	if (loading) {
 		return <div className="min-h-screen bg-slate-50 p-6 text-center text-slate-500">Loading tasks...</div>
@@ -270,6 +317,21 @@ const ManagerTasks = () => {
 												<span className="inline-flex items-center gap-1"><Calendar className="h-3 w-3" /> Due {formatDate(task.due_date)}</span>
 												<span className="inline-flex items-center gap-1"><FileText className="h-3 w-3" /> Progress {task.progress || 0}%</span>
 											</div>
+											{task.progress_note && (
+												<div className="mt-3 rounded-lg border border-sky-100 bg-sky-50 p-2.5">
+													<p className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">Progress note</p>
+													<p className="mt-1 line-clamp-3 text-sm text-slate-700">{getProgressNotePreview(task.progress_note)}</p>
+												</div>
+											)}
+											<div className="mt-3">
+												<div className="mb-1 flex items-center justify-between text-[11px] text-slate-500">
+													<span>Progress</span>
+													<span>{task.progress || 0}%</span>
+												</div>
+												<div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+													<div className="h-full rounded-full bg-blue-600" style={{ width: `${Math.min(100, Math.max(0, Number(task.progress || 0)))}%` }} />
+												</div>
+											</div>
 										</div>
 
 										<div className="flex flex-col gap-3 lg:items-end">
@@ -290,9 +352,28 @@ const ManagerTasks = () => {
 														Review Submission
 													</button>
 												)}
+												<button
+													onClick={() => openEditTask(task)}
+													className="rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100"
+												>
+													Edit Task
+												</button>
+												<button
+													onClick={() => handleDeleteTask(task.id)}
+													className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+												>
+													Delete Task
+												</button>
 											</div>
 										</div>
 									</div>
+
+									{task.progress_note && (
+										<div className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-700">
+											<p className="font-medium text-slate-900">Progress Note</p>
+											<p className="mt-1 line-clamp-2">{getProgressNotePreview(task.progress_note)}</p>
+										</div>
+									)}
 								</div>
 							))
 						)}
@@ -313,6 +394,9 @@ const ManagerTasks = () => {
 									<div>
 										<p className="text-sm font-medium text-slate-900">{task.title}</p>
 										<p className="text-xs text-slate-500">{assigneeName(task)} · {task.project_name || "No project"}</p>
+										{task.progress_note && (
+											<p className="mt-1 max-w-xl truncate text-xs text-sky-700">{getProgressNotePreview(task.progress_note)}</p>
+										)}
 									</div>
 									<div className="flex items-center gap-3">
 										<span className="text-xs text-slate-500">{task.progress || 0}%</span>
@@ -332,11 +416,11 @@ const ManagerTasks = () => {
 
 			{showAddTaskModal && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-					<div className="w-[92vw] max-w-2xl rounded-xl bg-white p-4 shadow-2xl sm:p-6">
+					<div className="w-[92vw] max-h-[90vh] max-w-2xl overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:p-6">
 						<div className="mb-5 flex items-center justify-between">
 							<div>
 								<p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Create task</p>
-								<h2 className="text-xl font-semibold text-slate-900">Add Task</h2>
+								<h2 className="text-xl font-semibold text-slate-900">{editingTaskId ? "Edit Task" : "Add Task"}</h2>
 							</div>
 							<button onClick={() => setShowAddTaskModal(false)} className="rounded-full p-2 hover:bg-slate-100">
 								<X className="h-4 w-4 text-slate-500" />
@@ -441,12 +525,23 @@ const ManagerTasks = () => {
 								Cancel
 							</button>
 							<button
-								onClick={handleAddTask}
+								onClick={handleSaveTask}
 								className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 font-medium text-white hover:bg-blue-700"
 							>
-								Create Task
+								{editingTaskId ? "Update Task" : "Create Task"}
 							</button>
 						</div>
+
+						{editingTaskId && (
+							<div className="mt-4 flex justify-end">
+								<button
+									onClick={() => handleDeleteTask(editingTaskId)}
+									className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700"
+								>
+									{isDeletingTask ? "Deleting..." : "Delete Task"}
+								</button>
+							</div>
+						)}
 					</div>
 				</div>
 			)}
@@ -516,6 +611,13 @@ const ManagerTasks = () => {
 										<p className="mt-1 text-sm text-slate-900">{selectedTask.submission_description || selectedTask.work_description || "No work description submitted."}</p>
 									</div>
 									<div>
+										<p className="text-xs font-medium text-slate-500">Current Progress</p>
+										<div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+											<div className="h-full rounded-full bg-blue-600" style={{ width: `${Math.min(100, Math.max(0, Number(selectedTask.progress || 0)))}%` }} />
+										</div>
+										<p className="mt-2 text-xs text-slate-600">{selectedTask.progress || 0}% complete</p>
+									</div>
+									<div>
 										<p className="text-xs font-medium text-slate-500">Work URL</p>
 										{selectedTask.submission_url || selectedTask.work_url ? (
 											<a href={selectedTask.submission_url || selectedTask.work_url} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm text-blue-600 underline break-all">
@@ -535,7 +637,7 @@ const ManagerTasks = () => {
 														? JSON.parse(selectedTask.submission_files)
 														: selectedTask.submission_files
 												}
-											} catch (e) {
+											} catch {
 												files = []
 											}
 											if (!files || files.length === 0) return <p className="mt-1 text-sm text-slate-500">No attachments submitted.</p>

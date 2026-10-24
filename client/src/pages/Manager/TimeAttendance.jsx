@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react"
 import { CheckCircle2, Clock, AlertCircle, ChevronRight, Play, Pause } from "lucide-react"
 import { timeAttendanceAPI, managerAPI } from "../../services/api"
 import { getAssetUrl } from "../../config/env"
+import { useRealtime } from "../../hooks/useRealtime"
 
 function formatDurationFriendly(totalMinutes) {
 	const minutes = Number(totalMinutes)
@@ -48,31 +49,22 @@ const getStatusIcon = (status) => {
 
 function formatTime(value) {
 	if (!value) return "-"
-	try {
-		const d = new Date(value)
-		if (!Number.isNaN(d.getTime())) {
-			return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
-		}
-	} catch {
-		// Fall through to string fallback on invalid date.
+	const d = new Date(value)
+	if (!Number.isNaN(d.getTime())) {
+		return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
 	}
 	return String(value).slice(0, 5) || "-"
 }
 
 function formatDate(value) {
 	if (!value) return "Unknown"
-	try {
-		const d = new Date(value)
-		if (!Number.isNaN(d.getTime())) {
-			return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-		}
-	} catch {
-		// Fall through to string fallback on invalid date.
+	const d = new Date(value)
+	if (!Number.isNaN(d.getTime())) {
+		return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 	}
 	return String(value).slice(0, 10)
 }
 
-// Convert a "HH:MM" (24-hour) office-time string to 12-hour format with AM/PM.
 function formatOfficeTime(value) {
 	if (!value) return "-"
 	const match = String(value).match(/^(\d{1,2}):(\d{2})/)
@@ -86,8 +78,6 @@ function formatOfficeTime(value) {
 	return `${h}:${m} ${period}`
 }
 
-// Calculate the office shift length in hours from start/end "HH:MM" strings.
-// Handles overnight shifts (e.g. 20:00 - 10:00 = 14 hours).
 function getOfficeDurationHours(start, end) {
 	if (!start || !end) return 8
 	const [sh, sm] = String(start).split(":").map((n) => parseInt(n, 10) || 0)
@@ -101,56 +91,41 @@ function getOfficeDurationHours(start, end) {
 }
 
 function deriveWorkHours(log) {
+	if (log.check_in && log.check_out) {
+		const diff = new Date(log.check_out).getTime() - new Date(log.check_in).getTime()
+		if (diff > 0) return Math.round((diff / 3600000) * 10) / 10
+	}
+	if (log.check_in && !log.check_out) {
+		const diff = Date.now() - new Date(log.check_in).getTime()
+		if (diff > 0) return Math.round((diff / 3600000) * 10) / 10
+	}
 	if (log.duration_minutes) {
 		return Math.round((log.duration_minutes / 60) * 10) / 10
-	}
-	if (log.check_in && log.check_out) {
-		try {
-			const diff = new Date(log.check_out).getTime() - new Date(log.check_in).getTime()
-			if (diff > 0) return Math.round((diff / 3600000) * 10) / 10
-		} catch {
-			// Ignore invalid timestamp differences.
-		}
 	}
 	return 0
 }
 
-// Session duration in minutes. For a live (open) session, counts elapsed time
-// up to now; for a closed session, uses check_in/check_out.
 function deriveSessionMinutes(log) {
 	const safeMinutes = Number.isFinite(Number(log?.duration_minutes)) ? Math.round(Number(log.duration_minutes)) : 0
 	if (log?.check_in && log?.check_out) {
-		try {
-			const diff = new Date(log.check_out).getTime() - new Date(log.check_in).getTime()
-			if (Number.isFinite(diff) && diff > 0) return Math.round(diff / 60000)
-		} catch {
-			// Ignore invalid timestamp differences.
-		}
+		const diff = new Date(log.check_out).getTime() - new Date(log.check_in).getTime()
+		if (Number.isFinite(diff) && diff > 0) return Math.round(diff / 60000)
 	}
 	if (log?.check_in && !log?.check_out) {
-		try {
-			const diff = Date.now() - new Date(log.check_in).getTime()
-			if (Number.isFinite(diff) && diff > 0) return Math.round(diff / 60000)
-		} catch {
-			// Ignore invalid live session timing.
-		}
+		const diff = Date.now() - new Date(log.check_in).getTime()
+		if (Number.isFinite(diff) && diff > 0) return Math.round(diff / 60000)
 	}
 	return safeMinutes > 0 ? safeMinutes : 0
 }
 
 function deriveStatus(log, officeStart) {
 	if (!log.check_in) return "Absent"
-	try {
-		const d = new Date(log.check_in)
-		if (!Number.isNaN(d.getTime())) {
-			const minutes = d.getHours() * 60 + d.getMinutes()
-			const [sh, sm] = String(officeStart || "09:00").split(":").map((n) => parseInt(n, 10) || 0)
-			const startMinutes = sh * 60 + sm
-			// 15 min grace period
-			if (minutes > startMinutes + 15) return "Late"
-		}
-	} catch {
-		// Fall through to default status if the timestamp can't be parsed.
+	const d = new Date(log.check_in)
+	if (!Number.isNaN(d.getTime())) {
+		const minutes = d.getHours() * 60 + d.getMinutes()
+		const [sh, sm] = String(officeStart || "09:00").split(":").map((n) => parseInt(n, 10) || 0)
+		const startMinutes = sh * 60 + sm
+		if (minutes > startMinutes + 15) return "Late"
 	}
 	return "Present"
 }
@@ -170,19 +145,18 @@ const ManagerTimeAttendance = () => {
 	const [isClocked, setIsClocked] = useState(false)
 	const [activeLogId, setActiveLogId] = useState(null)
 	const [clocking, setClocking] = useState(false)
+	const [tick, setTick] = useState(0)
 
-	const loadData = async () => {
+	const loadData = async ({ silent = false } = {}) => {
 		try {
-			setLoading(true)
+			if (!silent) setLoading(true)
 
-			// Fetch manager's personal logs
 			const managerData = await managerAPI.getTimeLog()
 			const logs = (managerData && Array.isArray(managerData.records))
 				? managerData.records
 				: (Array.isArray(managerData) ? managerData : [])
 			setManagerLogs(logs)
 
-			// Detect active (open) clock-in session
 			const open = logs.find((l) => l.check_in && !l.check_out)
 			if (open) {
 				setIsClocked(true)
@@ -192,7 +166,6 @@ const ManagerTimeAttendance = () => {
 				setActiveLogId(null)
 			}
 
-			// Fetch all team records + office hours
 			const teamResp = await timeAttendanceAPI.getRecords()
 			const teamData = (teamResp && Array.isArray(teamResp.records)) ? teamResp.records : (Array.isArray(teamResp) ? teamResp : [])
 			setTeamRecords(teamData)
@@ -202,7 +175,7 @@ const ManagerTimeAttendance = () => {
 			setManagerLogs([])
 			setTeamRecords([])
 		} finally {
-			setLoading(false)
+			if (!silent) setLoading(false)
 		}
 	}
 
@@ -210,8 +183,19 @@ const ManagerTimeAttendance = () => {
 		const timerId = window.setTimeout(() => {
 			void loadData()
 		}, 0)
-		return () => window.clearTimeout(timerId)
+		
+		// Update durations every minute
+		const intervalId = window.setInterval(() => {
+			setTick((t) => t + 1)
+		}, 60000)
+
+		return () => {
+			window.clearTimeout(timerId)
+			window.clearInterval(intervalId)
+		}
 	}, [])
+
+	useRealtime(["attendance", "employees"], () => { void loadData({ silent: true }) })
 
 	const handleClockToggle = async () => {
 		try {
@@ -255,7 +239,7 @@ const ManagerTimeAttendance = () => {
 		return {
 			avg: Math.round((totalHours / count) * 10) / 10,
 		}
-	}, [managerTodayLogs])
+	}, [managerTodayLogs, tick])
 
 	const teamStats = useMemo(() => {
 		let present = 0
@@ -273,12 +257,11 @@ const ManagerTimeAttendance = () => {
 			late,
 			avg: Math.round((totalHours / count) * 10) / 10,
 		}
-	}, [teamTodayLogs, officeStart])
+	}, [teamTodayLogs, officeStart, tick])
 
 	const weeklyTable = useMemo(() => {
 		const map = new Map()
 		const now = new Date()
-		// ISO week number helper
 		const getWeekKey = (date) => {
 			const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
 			const dayNum = d.getUTCDay() || 7
@@ -286,7 +269,6 @@ const ManagerTimeAttendance = () => {
 			const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
 			return d.getUTCFullYear() + "-" + Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
 		}
-		// Collect last 4 unique week keys descending
 		const weekKeys = []
 		for (let i = 0; i < 35; i++) {
 			const d = new Date(now)
@@ -318,7 +300,6 @@ const ManagerTimeAttendance = () => {
 		<div className="min-h-screen bg-slate-50 p-6 lg:p-10">
 			<div className="max-w-6xl mx-auto">
 
-				{/* MANAGER'S PERSONAL ATTENDANCE SECTION */}
 				<div className="mb-8">
 					<h2 className="text-lg font-semibold text-slate-900 mb-4">Your Attendance</h2>
 					
@@ -436,7 +417,6 @@ const ManagerTimeAttendance = () => {
 						)}
 				</div>
 
-				{/* TEAM ATTENDANCE SECTION */}
 				<div className="mb-8">
 					<h2 className="text-lg font-semibold text-slate-900 mb-4">Team Attendance</h2>
 					
@@ -554,7 +534,6 @@ const ManagerTimeAttendance = () => {
 					</div>
 				</div>
 
-				{/* WEEKLY REPORT */}
 				<div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
 					<div className="px-6 py-4 border-b border-slate-200">
 						<h2 className="text-sm font-semibold text-slate-900">Attendance Report (4 Weeks)</h2>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Mail, Phone, MapPin, Lock, Save, Upload } from "lucide-react"
 import { employeeAPI } from "../../services/api"
 import ChangePasswordModal from "../../components/ChangePasswordModal"
@@ -17,7 +17,7 @@ const ProfilePage = ({ roleLabel = "Employee" }) => {
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [uploading, setUploading] = useState(false)
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     try {
       setLoading(true)
       const data = await employeeAPI.getProfile()
@@ -38,11 +38,14 @@ const ProfilePage = ({ roleLabel = "Employee" }) => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    loadProfile()
-  }, [])
+    const timer = setTimeout(() => {
+      loadProfile()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [loadProfile])
 
   const handleInputChange = (e) => {
     const name = e.target.name

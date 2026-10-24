@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Plus, Calendar, Users, Clock, Trash2, Loader2, X, UserPlus } from "lucide-react"
 import { meetingAPI } from "../../services/api"
+import { useRealtime } from "../../hooks/useRealtime"
 
 const emptyMeeting = {
   title: "",
@@ -18,23 +19,19 @@ function formatDateForInput(dateString) {
   
   const cleanDate = String(dateString).trim()
   
-  // If it already looks like YYYY-MM-DD, return as is
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) {
     return cleanDate
   }
   
-  // Extract date part from formats like "2024-10-11 10:00:00" or "2024-10-11T10:00:00"
   let dateOnly = cleanDate.split(" ")[0]
   if (!dateOnly || dateOnly.includes("T")) {
     dateOnly = cleanDate.split("T")[0]
   }
   
-  // If we got a valid date, return it
   if (dateOnly && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
     return dateOnly
   }
   
-  // Try parsing as Date object if it's in other format
   try {
     const dateObj = new Date(cleanDate)
     if (!isNaN(dateObj.getTime())) {
@@ -44,7 +41,7 @@ function formatDateForInput(dateString) {
       return `${year}-${month}-${day}`
     }
   } catch {
-    // Silently fail
+    // Ignore invalid date strings
   }
   
   return ""
@@ -55,12 +52,10 @@ function formatTimeForInput(timeString) {
   
   const cleanTime = String(timeString).trim()
   
-  // If it already looks like HH:MM, return as is
   if (/^\d{2}:\d{2}$/.test(cleanTime)) {
     return cleanTime
   }
   
-  // Extract time part from formats like "10:00:00"
   if (cleanTime.includes(":")) {
     const timeParts = cleanTime.split(":")
     if (timeParts.length >= 2) {
@@ -76,7 +71,6 @@ function formatTimeForInput(timeString) {
 function getMeetingDraft(meeting) {
   if (!meeting) return { ...emptyMeeting }
   
-  // Extract user IDs from selected_user_details if available, otherwise use selected_user_ids
   let selectedIds = []
   if (Array.isArray(meeting.selected_user_details) && meeting.selected_user_details.length > 0) {
     selectedIds = meeting.selected_user_details.map(u => Number(u.id))
@@ -84,17 +78,8 @@ function getMeetingDraft(meeting) {
     selectedIds = meeting.selected_user_ids
   }
   
-  // Format date and time for input fields
   let meetingDate = formatDateForInput(meeting.meeting_date)
   let meetingTime = formatTimeForInput(meeting.meeting_time)
-  
-  // Debug: Log if values are empty
-  if (!meetingDate && meeting.meeting_date) {
-    console.warn('Failed to format meeting_date:', meeting.meeting_date)
-  }
-  if (!meetingTime && meeting.meeting_time) {
-    console.warn('Failed to format meeting_time:', meeting.meeting_time)
-  }
   
   return {
     title: meeting.title || "",
@@ -145,7 +130,6 @@ function formatMeetingTime(timeString) {
 }
 
 function mapMeeting(m) {
-  // Get user IDs from selected_user_details if available, otherwise from selected_user_ids
   let selectedUserIds = []
   if (Array.isArray(m.selected_user_details) && m.selected_user_details.length > 0) {
     selectedUserIds = m.selected_user_details.map(u => Number(u.id))
@@ -210,6 +194,10 @@ const Meetings = function () {
     }
   }
 
+  useRealtime(["meetings", "employees"], () => {
+    void fetchMeetings()
+  })
+
   useEffect(() => {
     let isMounted = true;
 
@@ -260,14 +248,12 @@ const Meetings = function () {
       const selectedDetails = Array.isArray(current.selected_user_details) ? [...current.selected_user_details] : []
       
       if (selected.has(userId)) {
-        // Remove user
         selected.delete(userId)
         const index = selectedDetails.findIndex(u => Number(u.id) === userId)
         if (index > -1) {
           selectedDetails.splice(index, 1)
         }
       } else {
-        // Add user - find in attendeeGroups
         selected.add(userId)
         const userToAdd = attendeeGroups.flatMap(g => g.members || []).find(m => Number(m.id) === userId)
         if (userToAdd && !selectedDetails.find(u => Number(u.id) === userId)) {
@@ -366,12 +352,10 @@ const Meetings = function () {
   const completedMeetings = meetingList.filter(function (m) { return m.status == "Completed" })
 
   const getSelectedParticipants = () => {
-    // First check if we have selected_user_details from database
     if (Array.isArray(formData.selected_user_details) && formData.selected_user_details.length > 0) {
       return formData.selected_user_details
     }
     
-    // Fallback: search in attendeeGroups
     const selectedIds = new Set(formData.selected_user_ids || [])
     const selected = []
     
@@ -406,11 +390,9 @@ const Meetings = function () {
     const selected = new Set(formData.selected_user_ids || [])
     const selectedDetails = Array.isArray(formData.selected_user_details) ? [...formData.selected_user_details] : []
     
-    // Check if all members are already selected
     const allSelected = memberIds.every((id) => selected.has(id))
 
     if (allSelected) {
-      // Deselect all
       memberIds.forEach((id) => {
         selected.delete(id)
         const index = selectedDetails.findIndex(u => Number(u.id) === id)
@@ -419,7 +401,6 @@ const Meetings = function () {
         }
       })
     } else {
-      // Select all
       memberIds.forEach((id) => {
         selected.add(id)
         const member = teamGroup.members.find(m => Number(m.id) === id)
@@ -526,7 +507,6 @@ const Meetings = function () {
               </div>
             ) : (
               <>
-                {/* Selected Participants Section */}
                 <div>
                   <div className="mb-2 flex items-center gap-2">
                     <Users className="h-4 w-4 text-green-600" />
@@ -571,7 +551,6 @@ const Meetings = function () {
                   )}
                 </div>
 
-                {/* Available Participants Section - Team Wise */}
                 <div className="border-t border-slate-200 pt-3">
                   <div className="mb-2 flex items-center gap-2">
                     <UserPlus className="h-4 w-4 text-blue-600" />
@@ -583,7 +562,6 @@ const Meetings = function () {
                   {availableParticipants.length > 0 ? (
                     <div className="space-y-3">
                       {attendeeGroups.map((group) => {
-                        // Filter members to show only available ones
                         const selectedIds = new Set(formData.selected_user_ids || [])
                         const availableInGroup = (group.members || []).filter((member) => !selectedIds.has(Number(member.id)))
                         const allSelected = (group.members || []).length > 0 && (group.members || []).every((member) => selectedIds.has(Number(member.id)))

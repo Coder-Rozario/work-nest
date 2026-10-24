@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import { Send, Search, User, Loader2, Lock } from "lucide-react"
 import { messageAPI } from "../../services/api"
 import { getAssetUrl } from "../../config/env"
+import { useRealtime } from "../../hooks/useRealtime"
 
 function formatDateTime(createdAt) {
   if (!createdAt) return ""
@@ -75,8 +76,32 @@ function normalizeDisplayText(value) {
 }
 
 function getImageUrl(photo) {
-  if (!photo) return ""
-  return getAssetUrl(photo)
+  const value = photo ?? ""
+  if (!value) return ""
+  const normalized = typeof value === "string" ? value.trim() : ""
+  if (!normalized) return ""
+  if (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("data:")) {
+    return normalized
+  }
+  return getAssetUrl(normalized)
+}
+
+function resolveProfilePhoto(item) {
+  if (!item) return ""
+  const photo =
+    item.profile_photo ||
+    item.profilePhoto ||
+    item.avatar ||
+    item.photo ||
+    item.image ||
+    item.user?.profile_photo ||
+    item.user?.profilePhoto ||
+    item.user?.avatar ||
+    item.user?.photo ||
+    item.user?.image ||
+    ""
+
+  return getImageUrl(photo)
 }
 
 const Messages = function () {
@@ -101,7 +126,7 @@ const Messages = function () {
         email: conv.email || "",
         team: conv.team_name || conv.team || "",
         teamName: conv.team_name || conv.team || "",
-        profilePhoto: getImageUrl(conv.profile_photo),
+        profilePhoto: resolveProfilePhoto(conv),
         lastMessage: normalizeDisplayText(conv.content || conv.encrypted_text || "No messages yet"),
         time: formatDateTime(conv.created_at),
         role: normalizeRoleLabel(conv.role || "employee"),
@@ -131,7 +156,7 @@ const Messages = function () {
           type: isSent ? "sent" : "received",
         }
       })
-      setCurrentMessages(mapped)
+      setCurrentMessages([...mapped].reverse())
     } catch (err) {
       console.error("Failed to load messages:", err)
       setError("You are not allowed to access this conversation.")
@@ -145,6 +170,11 @@ const Messages = function () {
       await fetchConversations()
     })()
   }, [])
+
+  useRealtime('messages', () => {
+    void fetchConversations()
+    if (selectedContact) void fetchMessages(selectedContact.id)
+  })
 
   const filteredContacts = contacts.filter(function (contact) {
     const term = searchTerm.toLowerCase()

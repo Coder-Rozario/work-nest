@@ -15,6 +15,7 @@ body,
 body {
   overflow-x: hidden;
   background: #f8fafc;
+  color: #0f172a;
 }
 
 * {
@@ -37,4 +38,30 @@ body {
   width: 100% !important;
   margin-left: 0 !important;
   margin-right: 0 !important;
+}
+
+@layer components {
+  .worknest-modal-backdrop {
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px];
+  }
+
+  .worknest-modal-card {
+    @apply w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl;
+  }
+
+  .worknest-modal-header {
+    @apply flex items-center justify-between border-b border-slate-200 px-5 py-4;
+  }
+
+  .worknest-primary-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .worknest-secondary-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .worknest-ghost-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-200;
+  }
 }
